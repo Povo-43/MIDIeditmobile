@@ -375,6 +375,7 @@ private fun EditorScreen(
 
             override fun setRollSelection(ids: Set<Long>) = vm.setRollSelection(ids)
             override fun requestNoteInspector(id: Long) = vm.requestNoteInspector(id)
+            override fun deleteNoteByDoubleTap(id: Long) = vm.deleteNoteByDoubleTap(id)
             override fun deleteNotes(ids: Set<Long>) = vm.deleteNotes(ids)
             override fun seekTo(tick: Double) = vm.seekTo(tick)
             override fun setLoopRange(startTick: Int, endTick: Int) =
