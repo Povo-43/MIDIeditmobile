@@ -1,0 +1,134 @@
+name: UI screenshot check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    name: Capture top bar before/after
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER="$(find "${SDK_ROOT}/cmdline-tools" -type f -name sdkmanager | sort | tail -1)"
+          yes | "${SDKMANAGER}" --licenses > /dev/null || true
+          "${SDKMANAGER}" --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          echo "${SDK_ROOT}/platform-tools" >> "${GITHUB_PATH}"
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Download previous release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh release download v1.1.3 --pattern "*.apk" --dir release
+          ls -l release
+
+      - name: Capture screenshots on emulator
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          script: |
+            set -e
+
+            adb shell wm size 1920x1200 || true
+            adb shell wm density 200 || true
+            adb shell settings put system accelerometer_rotation 0 || true
+            adb shell settings put system user_rotation 0 || true
+            sleep 2
+
+            capture() {
+              local prefix="$1"
+              adb shell am force-stop com.pianocanvas.midi || true
+              adb shell pm clear com.pianocanvas.midi > /dev/null 2>&1 || true
+              adb shell am start -n com.pianocanvas.midi/.MainActivity
+              sleep 10
+              adb exec-out screencap -p > "${prefix}-welcome.png"
+              adb shell uiautomator dump /sdcard/window.xml > /dev/null
+              adb pull /sdcard/window.xml "${prefix}-window.xml" > /dev/null
+              local coords
+              coords=$(python3 - "${prefix}-window.xml" <<'PY'
+            import re
+            import sys
+
+            xml = open(sys.argv[1], encoding="utf-8").read()
+            patterns = [
+                r'text="新しい曲を作成"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+                r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="新しい曲を作成"',
+                r'content-desc="新しい曲を作成"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, xml)
+                if match:
+                    x1, y1, x2, y2 = map(int, match.groups())
+                    print(f"{(x1 + x2) // 2} {(y1 + y2) // 2}")
+                    break
+            PY
+              )
+              if [ -z "${coords}" ]; then
+                local size w h
+                size=$(adb shell wm size | tr -d '\r' | awk -F' ' '{print $3}')
+                w=${size%x*}
+                h=${size#*x}
+                coords="$((w / 2)) $((h * 42 / 100))"
+              fi
+              echo "Tap coordinates for ${prefix}: ${coords}"
+              adb shell input tap ${coords}
+              sleep 7
+              adb exec-out screencap -p > "${prefix}-editor.png"
+              adb shell uiautomator dump /sdcard/window.xml > /dev/null
+              adb pull /sdcard/window.xml "${prefix}-editor-window.xml" > /dev/null
+            }
+
+            RELEASE_APK=$(ls release/*.apk | head -1)
+            echo "Installing previous release: ${RELEASE_APK}"
+            adb uninstall com.pianocanvas.midi > /dev/null 2>&1 || true
+            adb install -r "${RELEASE_APK}"
+            capture before
+
+            echo "Installing current debug build"
+            adb uninstall com.pianocanvas.midi > /dev/null 2>&1 || true
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            capture after
+
+            echo "Screenshots:"
+            ls -l *.png
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: top-bar-screenshots
+          path: |
+            before-*.png
+            after-*.png
+            before-*.xml
+            after-*.xml
+          if-no-files-found: warn
