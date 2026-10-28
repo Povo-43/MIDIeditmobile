@@ -354,6 +354,17 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _selection.value = _selection.value - ids
     }
 
+    /**
+     * Double-tapping a note is a quick delete gesture. It is still a normal
+     * undoable edit, so the snackbar points at Undo for accidental taps.
+     */
+    fun deleteNoteByDoubleTap(id: Long) {
+        val p = _project.value ?: return
+        if (p.noteById(id) == null) return
+        deleteNotes(setOf(id))
+        postMessage("ノートを削除しました（元に戻すで復元できます）")
+    }
+
     fun selectAll() {
         _selection.value = _project.value?.notes?.mapTo(LinkedHashSet()) { it.id } ?: emptySet()
     }

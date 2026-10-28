@@ -23,6 +23,7 @@ interface RollHost {
     fun commitRollNotes(newNotes: List<Note>)
     fun setRollSelection(ids: Set<Long>)
     fun requestNoteInspector(id: Long)
+    fun deleteNoteByDoubleTap(id: Long)
     fun deleteNotes(ids: Set<Long>)
     fun seekTo(tick: Double)
     fun setLoopRange(startTick: Int, endTick: Int)

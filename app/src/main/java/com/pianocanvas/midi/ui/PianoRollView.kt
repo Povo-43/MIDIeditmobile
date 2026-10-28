@@ -717,18 +717,22 @@ class PianoRollView @JvmOverloads constructor(
                 if (id != null) {
                     val current = host?.selection() ?: selectionIds
                     if (id !in current) host?.setRollSelection(setOf(id))
-                    project?.noteById(id)?.let { host?.previewNote(it.pitch, it.velocity) }
                     val now = SystemClock.uptimeMillis()
-                    if (lastTapNoteId == id &&
+                    val editAllowed = prefs.fingerEditing || isStylus(event)
+                    if (editAllowed &&
+                        lastTapNoteId == id &&
                         now - lastTapAt <= 350 &&
                         kotlin.math.sqrt(
                             (downX - lastTapX) * (downX - lastTapX) +
                                 (downY - lastTapY) * (downY - lastTapY)
                         ) < dp(48f)
                     ) {
-                        host?.requestNoteInspector(id)
+                        // Double-tap deletes the note. Numeric editing stays
+                        // available from the dock and the hover toolbar.
+                        host?.deleteNoteByDoubleTap(id)
                         lastTapNoteId = null
                     } else {
+                        project?.noteById(id)?.let { host?.previewNote(it.pitch, it.velocity) }
                         lastTapNoteId = id
                         lastTapAt = now
                         lastTapX = downX
