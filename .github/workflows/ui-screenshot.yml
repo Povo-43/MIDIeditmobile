@@ -76,4 +76,10 @@ jobs:
             after-*.png
             before-*.xml
             after-*.xml
+            before-*.svg
+            after-*.svg
+            before-displays.txt
+            after-displays.txt
+            wm-size.txt
+            wm-density.txt
           if-no-files-found: warn

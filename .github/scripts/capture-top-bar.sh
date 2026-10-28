@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Temporary helper for the ui-screenshot workflow. Captures the editor screen
-# of the previous release and of the current debug build so the top bar can be
-# compared visually.
+# Temporary helper for the ui-screenshot workflow. Captures the editor screen of
+# the previous release and of the current debug build with a display cutout and
+# a status bar active, then verifies from the UI hierarchy that the top bar
+# clears the system bars. PNG screenshots are best effort (the software renderer
+# often produces black frames); the XML dumps are the ground truth.
 set -euo pipefail
 
-ADB_TIMEOUT=180
+ADB_TIMEOUT=300
 adb() { command adb -s emulator-5554 "$@"; }
-export -f adb 2>/dev/null || true
 
 wait_for_boot() {
   local waited=0
@@ -21,25 +22,42 @@ wait_for_boot() {
   sleep 5
 }
 
+install_with_retry() {
+  local apk="$1" attempt=1
+  # The package verifier occasionally times out on slow emulators
+  # (INSTALL_FAILED_VERIFICATION_FAILURE). Disable it and retry a few times.
+  adb shell settings put global verifier_verify_adb_installs 0 || true
+  adb shell settings put global package_verifier_enable 0 || true
+  until adb install -r "${apk}"; do
+    attempt=$((attempt + 1))
+    if [ "${attempt}" -gt 3 ]; then
+      echo "install kept failing: ${apk}" >&2
+      return 1
+    fi
+    echo "install failed (attempt $((attempt - 1))), retrying in 15s"
+    sleep 15
+  done
+}
+
 wait_for_boot
 
 # Tablet-ish viewport in landscape.
-adb shell wm size 1600x1000 || true
-adb shell wm density 180 || true
+adb shell wm size 1600x1000 | tee wm-size.txt || true
+adb shell wm density 180 | tee wm-density.txt || true
 adb shell settings put system accelerometer_rotation 0 || true
 adb shell settings put system user_rotation 0 || true
 sleep 3
 
 # A tall display cutout makes the safe-drawing inset large, which is exactly
 # the situation where a top bar can end up hidden underneath the system UI.
-adb shell cmd overlay enable-exclusive --category \
-  com.android.internal.display.cutout.emulation.tall > /dev/null 2>&1 || true
-sleep 3
-
-# Sanity check: if even the home screen captures black, the emulator GPU is the
-# problem rather than the app.
-adb exec-out screencap -p > home.png
-adb shell dumpsys window displays | grep -iE "cutout|stable|mCurrentFocus" | head -12 || true
+# "enable --category" is not a valid form; the overlay package itself is what
+# needs to be enabled (see developer.android.com display-cutout docs).
+echo "--- cutout overlays available on this image ---"
+adb shell cmd overlay list | grep -i cutout || true
+adb shell cmd overlay enable com.android.internal.display.cutout.emulation.tall || true
+sleep 5
+echo "--- display cutout / stable insets after enabling the overlay ---"
+adb shell dumpsys window displays | grep -iE "cutout|stable" | head -8 || true
 
 capture() {
   local prefix="$1"
@@ -47,7 +65,8 @@ capture() {
   adb shell pm clear com.pianocanvas.midi > /dev/null 2>&1 || true
   adb shell am start -W -n com.pianocanvas.midi/.MainActivity || true
   sleep 12
-  adb exec-out screencap -p > "${prefix}-welcome.png"
+  adb exec-out screencap -p > "${prefix}-welcome.png" || true
+  adb shell rm -f /sdcard/window.xml || true
   adb shell uiautomator dump /sdcard/window.xml > /dev/null 2>&1 || true
   adb pull /sdcard/window.xml "${prefix}-window.xml" > /dev/null 2>&1 || true
 
@@ -88,23 +107,30 @@ PY
   # shellcheck disable=SC2086
   adb shell input tap ${coords}
   sleep 12
-  adb exec-out screencap -p > "${prefix}-editor.png"
+  adb exec-out screencap -p > "${prefix}-editor.png" || true
+  adb shell rm -f /sdcard/window.xml || true
   adb shell uiautomator dump /sdcard/window.xml > /dev/null 2>&1 || true
   adb pull /sdcard/window.xml "${prefix}-editor-window.xml" > /dev/null 2>&1 || true
-  # Dump the current focus/insets so a failure can be diagnosed from the log.
-  adb shell dumpsys window | grep -E "mCurrentFocus|mSystemUiFlags" | head -5 || true
+  # Save the window/inset state so the verification step and any failure can be
+  # diagnosed from the artifacts alone.
+  adb shell dumpsys window displays > "${prefix}-displays.txt" || true
+  adb shell dumpsys window >> "${prefix}-displays.txt" 2>/dev/null || true
 }
 
 RELEASE_APK=$(ls release/*.apk | head -1)
 echo "Installing previous release: ${RELEASE_APK}"
 adb uninstall com.pianocanvas.midi > /dev/null 2>&1 || true
-adb install -r "${RELEASE_APK}"
+install_with_retry "${RELEASE_APK}"
 capture before
 
 echo "Installing current debug build"
 adb uninstall com.pianocanvas.midi > /dev/null 2>&1 || true
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+install_with_retry app/build/outputs/apk/debug/app-debug.apk
 capture after
 
+# Assert from the UI hierarchy that the top bar of the new build clears the
+# status bar and the display cutout, and render wireframe SVGs for review.
+python3 .github/scripts/verify_top_bar.py
+
 echo "Screenshots:"
-ls -l ./*.png
+ls -l ./*.png ./*.svg 2>/dev/null || true
