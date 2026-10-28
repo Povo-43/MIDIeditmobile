@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,13 +27,31 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
+import androidx.compose.material.icons.automirrored.rounded.NoteAdd
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DriveFileRenameOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileCopy
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.GridOn
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Straighten
+import androidx.compose.material.icons.rounded.Swipe
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -58,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.pianocanvas.midi.BuildConfig
 import com.pianocanvas.midi.audio.AudioStatus
 import com.pianocanvas.midi.editor.EditorUiState
 import com.pianocanvas.midi.editor.EditorViewModel
@@ -84,6 +105,7 @@ private fun AppDialog(
     title: String,
     onDismiss: () -> Unit,
     subtitle: String? = null,
+    icon: ImageVector? = null,
     actions: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -128,6 +150,19 @@ private fun AppDialog(
                 ) {
                     Column(Modifier.padding(22.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (icon != null) {
+                                Surface(
+                                    modifier = Modifier.size(44.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                    contentColor = MaterialTheme.colorScheme.primary,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(icon, contentDescription = null, modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 Text(title, style = MaterialTheme.typography.titleLarge)
                                 if (subtitle != null) {
@@ -188,13 +223,17 @@ fun BpmDialog(
     AppDialog(
         title = "テンポ",
         subtitle = "20〜400 BPM",
+        icon = Icons.Rounded.Speed,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(onClick = { if (valid) onApply(parsed!!.coerceIn(20.0, 400.0)) }, enabled = valid) {
-                Text("適用")
-            }
+            DialogPrimaryButton(
+                text = "適用",
+                icon = Icons.Rounded.Check,
+                enabled = valid,
+                onClick = { onApply(parsed!!.coerceIn(20.0, 400.0)) },
+            )
         },
     ) {
         OutlinedTextField(
@@ -244,14 +283,17 @@ fun MeterDialog(
     AppDialog(
         title = "拍子",
         subtitle = "曲の先頭の拍子を変更します",
+        icon = Icons.Rounded.Timer,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(
-                onClick = { if (valid) onApply(numerator, denominator) },
+            DialogPrimaryButton(
+                text = "適用",
+                icon = Icons.Rounded.Check,
                 enabled = valid,
-            ) { Text("適用") }
+                onClick = { onApply(numerator, denominator) },
+            )
         },
     ) {
         Text("分子", style = MaterialTheme.typography.labelMedium, color = Mist)
@@ -313,9 +355,10 @@ fun TrackPickerDialog(
     AppDialog(
         title = "編集するトラック",
         subtitle = "他のトラックはそのまま保持されます",
+        icon = Icons.Rounded.LibraryMusic,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("閉じる") }
+            DialogSecondaryButton("閉じる", Icons.Rounded.Close, onDismiss)
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -408,6 +451,7 @@ fun NoteInspectorDialog(
     AppDialog(
         title = "ノートを編集",
         subtitle = "ダブルタップしたノートの数値編集",
+        icon = Icons.Rounded.Edit,
         onDismiss = onDismiss,
         actions = {
             TextButton(
@@ -415,10 +459,18 @@ fun NoteInspectorDialog(
                 colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.error
                 ),
-            ) { Text("削除") }
-            TextButton(onClick = onDuplicate) { Text("複製") }
+            ) {
+                Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.size(5.dp))
+                Text("削除")
+            }
+            TextButton(onClick = onDuplicate) {
+                Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.size(5.dp))
+                Text("複製")
+            }
             Spacer(Modifier.size(6.dp))
-            Button(onClick = onDismiss) { Text("完了") }
+            DialogPrimaryButton("完了", Icons.Rounded.Check, onClick = onDismiss)
         },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -563,11 +615,16 @@ fun SelectionVelocityDialog(
     AppDialog(
         title = "ベロシティ",
         subtitle = "${notes.size} 個のノート",
+        icon = Icons.AutoMirrored.Rounded.VolumeUp,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(onClick = { onApply(value.roundToInt()) }) { Text("適用") }
+            DialogPrimaryButton(
+                "適用",
+                Icons.Rounded.Check,
+                onClick = { onApply(value.roundToInt()) },
+            )
         },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -608,14 +665,17 @@ fun SelectionLengthDialog(
     AppDialog(
         title = "長さ",
         subtitle = "${notes.size} 個のノートを揃えます",
+        icon = Icons.Rounded.Straighten,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(
-                onClick = { parsed?.let { onApplyTicks(it.coerceAtLeast(1)) } },
+            DialogPrimaryButton(
+                text = "tickで適用",
+                icon = Icons.Rounded.Check,
                 enabled = parsed != null && parsed > 0,
-            ) { Text("tickで適用") }
+                onClick = { parsed?.let { onApplyTicks(it.coerceAtLeast(1)) } },
+            )
         },
     ) {
         OutlinedTextField(
@@ -651,11 +711,16 @@ fun InputVelocityDialog(
     AppDialog(
         title = "入力ベロシティ",
         subtitle = "新しく追加する音符の強さ",
+        icon = Icons.AutoMirrored.Rounded.VolumeUp,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(onClick = { onApply(value.roundToInt()) }) { Text("適用") }
+            DialogPrimaryButton(
+                "適用",
+                Icons.Rounded.Check,
+                onClick = { onApply(value.roundToInt()) },
+            )
         },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -694,18 +759,15 @@ fun SettingsDialog(
 ) {
     AppDialog(
         title = "設定",
+        icon = Icons.Rounded.Settings,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onHelp) {
-                Icon(Icons.AutoMirrored.Rounded.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(6.dp))
-                Text("操作ガイド")
-            }
+            DialogSecondaryButton("操作ガイド", Icons.AutoMirrored.Rounded.HelpOutline, onHelp)
             Spacer(Modifier.size(6.dp))
-            Button(onClick = onDismiss) { Text("閉じる") }
+            DialogPrimaryButton("閉じる", Icons.Rounded.Check, onClick = onDismiss)
         },
     ) {
-        SectionTitle("入力")
+        SectionTitle("入力", Icons.Rounded.Tune)
         SettingLabel("グリッド / スナップ")
         GridUnitChips(selected = ui.prefs.grid, includeOff = true, onSelect = vm::setGrid)
         Spacer(Modifier.height(10.dp))
@@ -715,29 +777,40 @@ fun SettingsDialog(
         ToggleRow(
             title = "スナップ",
             description = "音符の開始・終了をグリッドに合わせる",
+            icon = Icons.Rounded.GridOn,
             checked = ui.prefs.snapEnabled,
             onCheckedChange = vm::setSnapEnabled,
         )
         ToggleRow(
             title = "指で音符を編集",
             description = "オフにすると指はスクロールと選択だけに使います",
+            icon = Icons.Rounded.TouchApp,
             checked = ui.prefs.fingerEditing,
             onCheckedChange = vm::setFingerEditing,
         )
         ToggleRow(
             title = "ペンのホバーツールバー",
             description = "ペンを浮かせたときに文脈メニューを表示",
+            icon = Icons.Rounded.PanTool,
             checked = ui.prefs.hoverToolbar,
             onCheckedChange = vm::setHoverToolbar,
         )
         ToggleRow(
             title = "再生中の自動スクロール",
             description = "再生位置が画面外に出たら追従します",
+            icon = Icons.Rounded.Swipe,
             checked = ui.prefs.autoScroll,
             onCheckedChange = vm::setAutoScroll,
         )
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.AutoMirrored.Rounded.VolumeUp,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(8.dp))
             Text("入力ベロシティ", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.weight(1f))
             Text(
@@ -756,13 +829,13 @@ fun SettingsDialog(
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(12.dp))
-        SectionTitle("音源")
+        SectionTitle("音源", Icons.Rounded.GraphicEq)
         AudioStatusCard(ui, vm, onLoadSoundFont)
 
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(12.dp))
-        SectionTitle("保存について")
+        SectionTitle("保存について", Icons.Rounded.Save)
         Text(
             "編集内容は約0.7秒後にアプリ内へ自動保存されます。MIDIの書き出し先とは別なので、元のファイルが勝手に上書きされることはありません。",
             style = MaterialTheme.typography.bodyMedium,
@@ -770,7 +843,7 @@ fun SettingsDialog(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Piano Canvas 1.0 ・ ピアノ専用MIDIエディタ",
+            "Piano Canvas ${BuildConfig.VERSION_NAME} ・ ピアノ専用MIDIエディタ",
             style = MaterialTheme.typography.labelSmall,
             color = Mist,
         )
@@ -857,12 +930,21 @@ private fun AudioStatusCard(
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
-    )
+private fun SectionTitle(text: String, icon: ImageVector) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.size(7.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
     Spacer(Modifier.height(8.dp))
 }
 
@@ -901,6 +983,7 @@ private fun GridUnitChips(
 private fun ToggleRow(
     title: String,
     description: String,
+    icon: ImageVector,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -911,6 +994,18 @@ private fun ToggleRow(
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Surface(
+            modifier = Modifier.size(34.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = if (checked) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+            else MaterialTheme.colorScheme.surfaceContainerHighest,
+            contentColor = if (checked) MaterialTheme.colorScheme.primary else Mist,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.size(10.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium)
             Text(description, style = MaterialTheme.typography.labelSmall, color = Mist)
@@ -925,13 +1020,15 @@ fun HelpDialog(onDismiss: () -> Unit) {
     AppDialog(
         title = "操作ガイド",
         subtitle = "指とスタイラスの操作",
+        icon = Icons.AutoMirrored.Rounded.HelpOutline,
         onDismiss = onDismiss,
         actions = {
-            Button(onClick = onDismiss) { Text("閉じる") }
+            DialogPrimaryButton("閉じる", Icons.Rounded.Check, onClick = onDismiss)
         },
     ) {
         HelpSection(
             "ペン（スタイラス）",
+            Icons.Rounded.Edit,
             listOf(
                 "ペンを浮かせる : ゴースト音符と対象ノートがハイライトされます。位置に応じたツールバーが出ます。",
                 "空欄をドラッグ : 音符の長さを描いて追加します。離した時点で確定します。",
@@ -944,6 +1041,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         HelpSection(
             "指",
+            Icons.Rounded.TouchApp,
             listOf(
                 "空欄をタップ : 現在の長さで音符を追加します。",
                 "空欄をドラッグ : 最初に動いた方向へスクロールします（軸固定）。",
@@ -958,6 +1056,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         HelpSection(
             "下部ツールバー",
+            Icons.Rounded.Tune,
             listOf(
                 "選択中は、長さ・ベロシティ・移調・複製・コピー・カット・削除・クオンタイズ・ループ範囲が使えます。",
                 "未選択時は、グリッド・入力長・スナップ・入力ベロシティ・全クオンタイズ・全選択が使えます。",
@@ -967,6 +1066,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         HelpSection(
             "保存とMIDI",
+            Icons.Rounded.Save,
             listOf(
                 "編集は自動保存され、次回起動時に復元されます。",
                 "MIDI書き出しは Storage Access Framework の保存先へ行います。",
@@ -978,8 +1078,17 @@ fun HelpDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun HelpSection(title: String, lines: List<String>) {
-    Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+private fun HelpSection(title: String, icon: ImageVector, lines: List<String>) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.size(7.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    }
     Spacer(Modifier.height(5.dp))
     lines.forEach { line ->
         Row(Modifier.padding(vertical = 3.dp)) {
@@ -1011,13 +1120,16 @@ fun RenameDialog(
     var text by remember { mutableStateOf(initial) }
     AppDialog(
         title = "曲名",
+        icon = Icons.Rounded.DriveFileRenameOutline,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(
+            DialogPrimaryButton(
+                text = "変更",
+                icon = Icons.Rounded.Check,
                 onClick = { onApply(text.trim().ifBlank { "無題" }) },
-            ) { Text("変更") }
+            )
         },
     ) {
         OutlinedTextField(
@@ -1040,11 +1152,12 @@ fun RenameDialog(
 fun ConfirmNewDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AppDialog(
         title = "新しいプロジェクト",
+        icon = Icons.AutoMirrored.Rounded.NoteAdd,
         onDismiss = onDismiss,
         actions = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            DialogSecondaryButton("キャンセル", Icons.Rounded.Close, onDismiss)
             Spacer(Modifier.size(6.dp))
-            Button(onClick = onConfirm) { Text("作成") }
+            DialogPrimaryButton("作成", Icons.Rounded.Add, onClick = onConfirm)
         },
     ) {
         Text(
@@ -1057,6 +1170,33 @@ fun ConfirmNewDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
 // ----------------------------------------------------------------------
 // Small shared controls
 // ----------------------------------------------------------------------
+
+@Composable
+private fun DialogPrimaryButton(
+    text: String,
+    icon: ImageVector,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Button(onClick = onClick, enabled = enabled) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(6.dp))
+        Text(text)
+    }
+}
+
+@Composable
+private fun DialogSecondaryButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    TextButton(onClick = onClick) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.size(5.dp))
+        Text(text)
+    }
+}
 
 @Composable
 private fun StepSquare(label: String, onClick: () -> Unit) {

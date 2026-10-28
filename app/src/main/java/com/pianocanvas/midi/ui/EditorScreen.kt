@@ -37,8 +37,10 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentCut
@@ -705,14 +707,14 @@ private fun WideTopRow(
         Spacer(Modifier.width(6.dp))
         MetaChip(
             text = project.timeSignature.label(),
-            icon = null,
+            icon = Icons.Rounded.MusicNote,
             onClick = onMeter,
         )
         if (project.tracks.size > 1) {
             Spacer(Modifier.width(6.dp))
             MetaChip(
                 text = project.track.name,
-                icon = Icons.Rounded.MusicNote,
+                icon = Icons.Rounded.Piano,
                 onClick = vm::openTrackPicker,
             )
         }
@@ -788,7 +790,7 @@ private fun CompactTopRows(
             Spacer(Modifier.width(6.dp))
             MetaChip(
                 text = project.timeSignature.label(),
-                icon = null,
+                icon = Icons.Rounded.MusicNote,
                 onClick = onMeter,
             )
         }
@@ -803,6 +805,12 @@ private fun TitleBlock(
     modifier: Modifier = Modifier,
 ) {
     val autosaveText = remember(ui.autosave) { autosaveLabel(ui.autosave) }
+    val autosaveIcon = when (ui.autosave) {
+        is AutosaveState.Saved -> Icons.Rounded.CheckCircle
+        is AutosaveState.Failed -> Icons.Rounded.Warning
+        else -> Icons.Rounded.Save
+    }
+    val autosaveTint = if (ui.autosave is AutosaveState.Failed) Coral else Mist
     val audioText = remember(ui.audio) {
         when (val audio = ui.audio) {
             is AudioStatus.Loading -> "音源を準備中…"
@@ -824,10 +832,17 @@ private fun TitleBlock(
             overflow = TextOverflow.Ellipsis,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                autosaveIcon,
+                contentDescription = null,
+                tint = autosaveTint,
+                modifier = Modifier.size(11.dp),
+            )
+            Spacer(Modifier.width(3.dp))
             Text(
                 autosaveText,
                 style = MaterialTheme.typography.labelSmall,
-                color = Mist,
+                color = autosaveTint,
                 maxLines = 1,
             )
             Spacer(Modifier.width(8.dp))
@@ -837,6 +852,13 @@ private fun TitleBlock(
                 color = Mist.copy(alpha = 0.5f),
             )
             Spacer(Modifier.width(8.dp))
+            Icon(
+                Icons.Rounded.GraphicEq,
+                contentDescription = null,
+                tint = if (ui.audio is AudioStatus.Failed) Coral else Mist,
+                modifier = Modifier.size(11.dp),
+            )
+            Spacer(Modifier.width(3.dp))
             Text(
                 audioText,
                 style = MaterialTheme.typography.labelSmall,
@@ -995,7 +1017,7 @@ private fun OverflowMenu(
             )
             DropdownMenuItem(
                 text = { Text("SoundFontを読み込む") },
-                leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
+                leadingIcon = { Icon(Icons.Rounded.Audiotrack, contentDescription = null) },
                 onClick = {
                     expanded = false
                     onSoundFont()
@@ -1362,6 +1384,13 @@ private fun ContextDock(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                Icon(
+                    Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = Mist.copy(alpha = 0.7f),
+                    modifier = Modifier.size(11.dp),
+                )
+                Spacer(Modifier.width(3.dp))
                 Text(
                     "${project.notes.size} notes",
                     style = MaterialTheme.typography.labelSmall,
