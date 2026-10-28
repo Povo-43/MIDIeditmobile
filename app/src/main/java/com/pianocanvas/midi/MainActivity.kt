@@ -37,9 +37,11 @@ class MainActivity : ComponentActivity() {
         // hidden behind the camera cutout (still touchable, never visible).
         // DEFAULT keeps edge-to-edge in portrait and lets the system letterbox
         // the window around the cutout in landscape, so the top bar stays clear
-        // even when the cutout inset never arrives.
-        window.attributes.layoutInDisplayCutoutMode =
-            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+        // even when the cutout inset never arrives. (Cutout modes require API 28.)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+        }
         // Only honour ACTION_VIEW on a fresh launch. After a process restart
         // the autosave is newer than the file that was originally opened, and
         // re-importing it here would silently discard the restored edits.
