@@ -1,0 +1,100 @@
+name: Build and Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, lint and build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Lint
+        run: ./gradlew :app:lintDebug --no-daemon --stacktrace
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare release artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          VERSION_NAME=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            SUFFIX="${GITHUB_REF_NAME}"
+          else
+            SUFFIX="dev-${GITHUB_SHA::7}"
+          fi
+          NAME="PianoCanvas-${VERSION_NAME}-${SUFFIX}.apk"
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/${NAME}"
+          (cd dist && sha256sum "${NAME}" > "${NAME}.sha256")
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "apk=dist/${NAME}" >> "$GITHUB_OUTPUT"
+          echo "sha256=dist/${NAME}.sha256" >> "$GITHUB_OUTPUT"
+          echo "Prepared ${NAME}"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: piano-canvas-apk
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.apk
+            dist/*.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Piano Canvas の Android APK です。
+
+            - パッケージ: `com.pianocanvas.midi`
+            - 対応バージョン: Android 8.0 (API 26) 以上
+            - 署名: デバッグ署名（サイドロードでの動作確認用）
+
+            インストール:
+
+            ```bash
+            adb install -r ${{ steps.artifact.outputs.name }}
+            ```
+
+            SHA-256 は同名の `.sha256` ファイルにあります。

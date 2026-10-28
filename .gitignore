@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+.kotlin/
+build/
+app/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration (contains the machine-specific SDK path)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Build outputs and signing material
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.keystore
+*.jks
