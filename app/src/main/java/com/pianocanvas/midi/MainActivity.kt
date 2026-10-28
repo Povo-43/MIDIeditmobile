@@ -3,6 +3,7 @@ package com.pianocanvas.midi
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -29,6 +30,16 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
+        // enableEdgeToEdge switches the window to LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+        // which pushes the window under the display cutout in every orientation.
+        // The top bar then depends entirely on the ROM dispatching cutout insets;
+        // ROMs that skip them in landscape left the title, transport and menu
+        // hidden behind the camera cutout (still touchable, never visible).
+        // DEFAULT keeps edge-to-edge in portrait and lets the system letterbox
+        // the window around the cutout in landscape, so the top bar stays clear
+        // even when the cutout inset never arrives.
+        window.attributes.layoutInDisplayCutoutMode =
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
         // Only honour ACTION_VIEW on a fresh launch. After a process restart
         // the autosave is newer than the file that was originally opened, and
         // re-importing it here would silently discard the restored edits.
