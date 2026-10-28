@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -179,6 +180,7 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
             Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
+                .safeDrawingPadding()
         ) {
             val project = state.project
             if (project != null) {
@@ -634,10 +636,9 @@ private fun TopBar(
     onLoadSoundFont: () -> Unit,
 ) {
     Surface(
+        modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        shadowElevation = 10.dp,
     ) {
         Column {
             if (compact) {
@@ -672,6 +673,12 @@ private fun TopBar(
                 )
             }
             // A bright accent line separates the bar from the dark piano roll.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.outline)
+            )
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -961,10 +968,18 @@ private fun TransportControls(
 @Composable
 private fun HistoryButtons(ui: EditorUiState, vm: EditorViewModel) {
     IconButton(onClick = vm::undo, enabled = ui.canUndo, modifier = Modifier.size(42.dp)) {
-        Icon(Icons.AutoMirrored.Rounded.Undo, contentDescription = "元に戻す")
+        Icon(
+            Icons.AutoMirrored.Rounded.Undo,
+            contentDescription = "元に戻す",
+            tint = if (ui.canUndo) Paper else Mist.copy(alpha = 0.35f),
+        )
     }
     IconButton(onClick = vm::redo, enabled = ui.canRedo, modifier = Modifier.size(42.dp)) {
-        Icon(Icons.AutoMirrored.Rounded.Redo, contentDescription = "やり直す")
+        Icon(
+            Icons.AutoMirrored.Rounded.Redo,
+            contentDescription = "やり直す",
+            tint = if (ui.canRedo) Paper else Mist.copy(alpha = 0.35f),
+        )
     }
 }
 
@@ -994,10 +1009,22 @@ private fun MetaChip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = if (active) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(15.dp),
+                )
                 Spacer(Modifier.width(5.dp))
             }
-            Text(text, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Text(
+                text,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (active) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1014,7 +1041,7 @@ private fun OverflowMenu(
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.size(44.dp)) {
-            Icon(Icons.Rounded.MoreVert, contentDescription = "メニュー")
+            Icon(Icons.Rounded.MoreVert, contentDescription = "メニュー", tint = Paper)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
