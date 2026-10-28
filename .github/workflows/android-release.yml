@@ -69,7 +69,7 @@ jobs:
           else
             SUFFIX="dev-${GITHUB_SHA::7}"
           fi
-          NAME="PianoCanvas-${VERSION_NAME}-${SUFFIX}.apk"
+          NAME="MIDIeditmobile-${VERSION_NAME}-${SUFFIX}.apk"
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk "dist/${NAME}"
           (cd dist && sha256sum "${NAME}" > "${NAME}.sha256")
@@ -81,7 +81,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: piano-canvas-apk
+          name: midi-edit-mobile-apk
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -96,7 +96,7 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            Piano Canvas の Android APK です。
+            MIDIeditmobile の Android APK です。
 
             - パッケージ: `com.pianocanvas.midi`
             - 対応バージョン: Android 8.0 (API 26) 以上

@@ -1,11 +1,11 @@
-# Piano Canvas
+# MIDIeditmobile
 
 Android タブレット向けの、ピアノ専用 MIDI エディタです。Kotlin + Jetpack Compose で構成し、
 ピアノロールだけはスタイラスホバーと細かいポインタ制御のため、独自の `View` + `Canvas` で描画・操作しています。
 WebView や Web アプリは使用していません。
 
 - パッケージ: `com.pianocanvas.midi`
-- アプリ名: Piano Canvas
+- アプリ名: MIDIeditmobile
 - minSdk 26 / targetSdk 34
 - 内蔵音源: 同梱の `app/src/main/assets/piano.sf2`（自前生成・CC0）
 - 出力 APK: `app/build/outputs/apk/debug/app-debug.apk`

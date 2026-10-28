@@ -129,8 +129,8 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun PianoCanvasApp(vm: EditorViewModel, initialUri: String? = null) {
-    PianoCanvasTheme {
+fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
+    MidiEditMobileTheme {
         val state by vm.uiState.collectAsStateWithLifecycle()
         val hover by vm.hover.collectAsStateWithLifecycle()
         val inspectorId by vm.inspectorNoteId.collectAsStateWithLifecycle()
@@ -252,7 +252,7 @@ private fun WelcomeScreen(onNewProject: () -> Unit, onImport: () -> Unit) {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Piano Canvas",
+                "MIDIeditmobile",
                 style = MaterialTheme.typography.displaySmall,
                 color = Paper,
             )

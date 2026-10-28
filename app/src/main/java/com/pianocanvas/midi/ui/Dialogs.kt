@@ -845,7 +845,7 @@ fun SettingsDialog(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Piano Canvas ${BuildConfig.VERSION_NAME} ・ ピアノ専用MIDIエディタ",
+            "MIDIeditmobile ${BuildConfig.VERSION_NAME} ・ ピアノ専用MIDIエディタ",
             style = MaterialTheme.typography.labelSmall,
             color = Mist,
         )

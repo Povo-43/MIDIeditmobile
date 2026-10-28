@@ -111,7 +111,7 @@ private val PianoTypography = Typography(
 )
 
 @Composable
-fun PianoCanvasTheme(content: @Composable () -> Unit) {
+fun MidiEditMobileTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = PianoColors,
         typography = PianoTypography,

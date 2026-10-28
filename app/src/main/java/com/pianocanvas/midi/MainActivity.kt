@@ -6,7 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import com.pianocanvas.midi.editor.EditorViewModel
-import com.pianocanvas.midi.ui.PianoCanvasApp
+import com.pianocanvas.midi.ui.MidiEditMobileApp
 
 /**
  * Single-activity host. The editor itself is Compose, with the piano roll as a
@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
         // re-importing it here would silently discard the restored edits.
         val initialUri = if (savedInstanceState == null) intent?.dataString else null
         setContent {
-            PianoCanvasApp(vm = vm, initialUri = initialUri)
+            MidiEditMobileApp(vm = vm, initialUri = initialUri)
         }
     }
 
