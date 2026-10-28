@@ -34,7 +34,12 @@ sleep 3
 # the situation where a top bar can end up hidden underneath the system UI.
 adb shell cmd overlay enable-exclusive --category \
   com.android.internal.display.cutout.emulation.tall > /dev/null 2>&1 || true
-sleep 2
+sleep 3
+
+# Sanity check: if even the home screen captures black, the emulator GPU is the
+# problem rather than the app.
+adb exec-out screencap -p > home.png
+adb shell dumpsys window displays | grep -iE "cutout|stable|mCurrentFocus" | head -12 || true
 
 capture() {
   local prefix="$1"
