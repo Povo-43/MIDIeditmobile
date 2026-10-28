@@ -60,22 +60,6 @@ class AudioEngine(private val context: Context) {
         }
     }
 
-    fun loadExternal(bytes: ByteArray, displayName: String) {
-        val token = ++loadToken
-        _status.value = AudioStatus.Loading
-        scope.launch {
-            try {
-                install(bytes, token)
-            } catch (t: Throwable) {
-                if (token == loadToken) {
-                    _status.value = AudioStatus.Failed(
-                        "$displayName を読み込めません: ${t.message ?: t.javaClass.simpleName}"
-                    )
-                }
-            }
-        }
-    }
-
     private fun install(bytes: ByteArray, token: Int) {
         val font = SoundFontLoader.load(bytes)
         if (token != loadToken) return

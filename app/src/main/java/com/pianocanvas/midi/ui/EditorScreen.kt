@@ -3,6 +3,7 @@ package com.pianocanvas.midi.ui
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -170,7 +171,8 @@ fun PianoCanvasApp(vm: EditorViewModel, initialUri: String? = null) {
         }
         val onExport: () -> Unit = { exportLauncher.launch(vm.suggestedFileName()) }
         val onLoadSoundFont: () -> Unit = {
-            soundFontLauncher.launch(arrayOf("application/octet-stream", "audio/*", "*/*"))
+            // "*/*" keeps .sf2 files visible on pickers that filter by MIME.
+            soundFontLauncher.launch(arrayOf("*/*"))
         }
 
         Box(
@@ -631,7 +633,12 @@ private fun TopBar(
     onRename: () -> Unit,
     onLoadSoundFont: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        shadowElevation = 10.dp,
+    ) {
         Column {
             if (compact) {
                 CompactTopRows(
@@ -664,11 +671,12 @@ private fun TopBar(
                     onLoadSoundFont = onLoadSoundFont,
                 )
             }
+            // A bright accent line separates the bar from the dark piano roll.
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(1.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant)
+                    .height(2.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
             )
         }
     }
@@ -811,7 +819,8 @@ private fun TitleBlock(
         is AutosaveState.Failed -> Icons.Rounded.Warning
         else -> Icons.Rounded.Save
     }
-    val autosaveTint = if (ui.autosave is AutosaveState.Failed) Coral else Mist
+    val autosaveTint = if (ui.autosave is AutosaveState.Failed) Coral
+    else MaterialTheme.colorScheme.onSurfaceVariant
     val audioText = remember(ui.audio) {
         when (val audio = ui.audio) {
             is AudioStatus.Loading -> "音源を準備中…"
@@ -850,20 +859,22 @@ private fun TitleBlock(
             Text(
                 "·",
                 style = MaterialTheme.typography.labelSmall,
-                color = Mist.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )
             Spacer(Modifier.width(8.dp))
             Icon(
                 Icons.Rounded.GraphicEq,
                 contentDescription = null,
-                tint = if (ui.audio is AudioStatus.Failed) Coral else Mist,
+                tint = if (ui.audio is AudioStatus.Failed) Coral
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(11.dp),
             )
             Spacer(Modifier.width(3.dp))
             Text(
                 audioText,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (ui.audio is AudioStatus.Failed) Coral else Mist,
+                color = if (ui.audio is AudioStatus.Failed) Coral
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -967,9 +978,15 @@ private fun MetaChip(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(11.dp),
-        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-        contentColor = if (active) MaterialTheme.colorScheme.primary else Paper,
+        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (active) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+            else MaterialTheme.colorScheme.outline,
+        ),
         modifier = Modifier.heightIn(min = 38.dp),
     ) {
         Row(

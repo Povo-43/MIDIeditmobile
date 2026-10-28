@@ -1,5 +1,6 @@
 package com.pianocanvas.midi.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileCopy
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -857,7 +859,8 @@ private fun AudioStatusCard(
     onLoadSoundFont: () -> Unit,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -866,7 +869,7 @@ private fun AudioStatusCard(
                 Icon(
                     Icons.Rounded.Audiotrack,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.secondary,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.size(8.dp))
@@ -881,20 +884,37 @@ private fun AudioStatusCard(
                         Text("音源を読み込み中…", style = MaterialTheme.typography.bodyMedium)
                     }
                     is AudioStatus.Ready -> {
-                        Column {
-                            Text(
-                                audio.presetName,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    audio.presetName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (ui.soundFontCustom) {
+                                    Spacer(Modifier.size(8.dp))
+                                    SourceBadge()
+                                }
+                            }
                             Text(
                                 "${audio.fontName} ・ ${audio.regionCount} ゾーン",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Mist,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            val fileName = ui.soundFontFileName
+                            if (ui.soundFontCustom && !fileName.isNullOrBlank()) {
+                                Text(
+                                    "ファイル: $fileName",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                     is AudioStatus.Failed -> {
@@ -907,25 +927,47 @@ private fun AudioStatusCard(
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = vm::reloadBundledSoundFont) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("内蔵ピアノ")
-                }
-                OutlinedButton(onClick = onLoadSoundFont, enabled = !ui.busy.soundFont) {
-                    Icon(Icons.Rounded.MusicNote, contentDescription = null, modifier = Modifier.size(17.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text(if (ui.busy.soundFont) "読込中…" else "SF2を開く")
-                }
+            Button(
+                onClick = onLoadSoundFont,
+                enabled = !ui.busy.soundFont,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(if (ui.busy.soundFont) "読込中…" else "SF2ファイルを選ぶ")
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = vm::reloadBundledSoundFont,
+                enabled = !ui.busy.soundFont,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(if (ui.soundFontCustom) "内蔵ピアノに戻す" else "内蔵ピアノを再読込")
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "SF2 (SoundFont 2.04) に対応。SF3/Ogg圧縮には対応していません。",
+                "端末のファイルから SF2 (SoundFont 2.04) を自由に選べます。選んだファイルはアプリ内に保存され、次回起動時も使われます。SF3/Ogg 圧縮には対応していません。",
                 style = MaterialTheme.typography.labelSmall,
-                color = Mist,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun SourceBadge() {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(
+            "外部ファイル",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 }
 
@@ -1073,6 +1115,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
                 "MIDI書き出しは Storage Access Framework の保存先へ行います。",
                 "読み込んだMIDIの他トラックは、編集していないイベントも含めて書き出し時に保持されます。",
                 "テンポと拍子は曲の先頭イベントとして更新されます。",
+                "設定の「音源」から端末の SF2 ファイルを選べます。選んだファイルはアプリ内に保存され、次回起動時も使われます。",
             ),
         )
     }

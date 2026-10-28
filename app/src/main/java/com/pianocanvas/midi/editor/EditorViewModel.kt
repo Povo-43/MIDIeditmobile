@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.pianocanvas.midi.audio.AudioEngine
 import com.pianocanvas.midi.audio.AudioStatus
 import com.pianocanvas.midi.audio.PlaybackEngine
+import com.pianocanvas.midi.audio.SoundFontLoader
 import com.pianocanvas.midi.data.AutosaveData
 import com.pianocanvas.midi.data.EditorPrefs
 import com.pianocanvas.midi.data.ProjectStore
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.text.SimpleDateFormat
@@ -43,6 +45,8 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+
+private const val MAX_SOUNDFONT_BYTES = 96 * 1024 * 1024
 
 enum class HoverZone { EMPTY, NOTE_BODY, NOTE_START, NOTE_END }
 
@@ -97,6 +101,8 @@ data class EditorUiState(
     val isPlaying: Boolean,
     val busy: BusyState,
     val trackPickerVisible: Boolean,
+    val soundFontCustom: Boolean,
+    val soundFontFileName: String?,
 )
 
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
@@ -117,6 +123,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _boot = MutableStateFlow<BootState>(BootState.Loading)
     private val _busy = MutableStateFlow(BusyState())
     private val _trackPickerVisible = MutableStateFlow(false)
+    private val _soundFontCustom = MutableStateFlow(false)
+    private val _soundFontFileName = MutableStateFlow<String?>(null)
     private val _inspectorNoteId = MutableStateFlow<Long?>(null)
     private val messages = Channel<String>(Channel.BUFFERED)
 
@@ -161,6 +169,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val audio: AudioStatus,
         val isPlaying: Boolean,
         val trackPickerVisible: Boolean,
+        val soundFontCustom: Boolean,
+        val soundFontFileName: String?,
     )
 
     private val coreFlow = combine(
@@ -176,9 +186,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private val runtimeFlow = combine(
-        audio.status, playback.isPlaying, _trackPickerVisible
-    ) { audioStatus, playing, picker ->
-        RuntimeState(audioStatus, playing, picker)
+        audio.status,
+        playback.isPlaying,
+        _trackPickerVisible,
+        _soundFontCustom,
+        _soundFontFileName,
+    ) { audioStatus, playing, picker, custom, fileName ->
+        RuntimeState(audioStatus, playing, picker, custom, fileName)
     }
 
     val uiState: StateFlow<EditorUiState> = combine(coreFlow, metaFlow, runtimeFlow) { c, m, r ->
@@ -196,6 +210,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             isPlaying = r.isPlaying,
             busy = m.busy,
             trackPickerVisible = r.trackPickerVisible,
+            soundFontCustom = r.soundFontCustom,
+            soundFontFileName = r.soundFontFileName,
         )
     }.stateIn(
         viewModelScope,
@@ -214,11 +230,22 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             isPlaying = false,
             busy = BusyState(),
             trackPickerVisible = false,
+            soundFontCustom = false,
+            soundFontFileName = null,
         )
     )
 
     init {
-        audio.loadBundled()
+        viewModelScope.launch {
+            val stored = withContext(Dispatchers.IO) { loadStoredSoundFont() }
+            if (stored != null) {
+                _soundFontCustom.value = true
+                _soundFontFileName.value = stored.second
+                audio.loadExternal(stored.first)
+            } else {
+                audio.loadBundled()
+            }
+        }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { ProjectStore.load(app) }
             result.fold(
@@ -923,26 +950,41 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    val (name, _) = queryMeta(app.contentResolver, uri)
+                    val displayName = name?.takeIf { it.isNotBlank() } ?: "SoundFont.sf2"
                     val bytes = app.contentResolver.openInputStream(uri)?.use {
-                        readLimited(it, 96 * 1024 * 1024)
+                        readLimited(it, MAX_SOUNDFONT_BYTES)
                     } ?: throw IOException("ファイルを開けません")
-                    bytes
+                    if (bytes.isEmpty()) throw IOException("ファイルが空です")
+                    // Validate before replacing a working font.
+                    SoundFontLoader.load(bytes)
+                    storeSoundFont(bytes, displayName)
+                    displayName
                 }
             }
             result.fold(
-                onSuccess = { bytes ->
-                    audio.loadExternal(bytes, "SoundFont")
-                    postMessage("SoundFontを読み込み中です")
+                onSuccess = { name ->
+                    _soundFontCustom.value = true
+                    _soundFontFileName.value = name
+                    audio.loadExternal(soundFontFile())
+                    postMessage("SoundFont「$name」を読み込み中です")
                 },
-                onFailure = { t -> postMessage("SoundFontを読み込めません: ${t.message}") }
+                onFailure = { t ->
+                    postMessage("SoundFontを読み込めません: ${t.message ?: t.javaClass.simpleName}")
+                }
             )
             _busy.value = _busy.value.copy(soundFont = false)
         }
     }
 
     fun reloadBundledSoundFont() {
-        audio.loadBundled()
-        postMessage("内蔵ピアノ音源を読み込み直しています")
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { soundFontDir().deleteRecursively() }
+            _soundFontCustom.value = false
+            _soundFontFileName.value = null
+            audio.loadBundled()
+            postMessage("内蔵ピアノ音源に戻しました")
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -1117,6 +1159,55 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             out.write(buffer, 0, n)
         }
         return out.toByteArray()
+    }
+
+    // ---------------------------------------------------------------------
+    // SoundFont storage
+    // ---------------------------------------------------------------------
+
+    private fun soundFontDir(): File = File(app.filesDir, "soundfonts").apply { mkdirs() }
+
+    private fun soundFontFile(): File = File(soundFontDir(), "custom.sf2")
+
+    private fun soundFontNameFile(): File = File(soundFontDir(), "custom.name")
+
+    /**
+     * Copies the chosen SF2 into app-private storage so it survives restarts.
+     * The original file on the device is never touched.
+     */
+    private fun storeSoundFont(bytes: ByteArray, displayName: String): File {
+        val dir = soundFontDir()
+        val temp = File(dir, "custom.tmp")
+        temp.writeBytes(bytes)
+        val target = File(dir, "custom.sf2")
+        if (target.exists() && !target.delete()) {
+            throw IOException("既存のSoundFontを置き換えられません")
+        }
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+        File(dir, "custom.name").writeText(displayName)
+        return target
+    }
+
+    /** Returns the stored font only when it still parses, otherwise cleans it up. */
+    private fun loadStoredSoundFont(): Pair<File, String>? {
+        val file = soundFontFile()
+        if (!file.isFile || file.length() == 0L) return null
+        val bytes = runCatching { file.readBytes() }.getOrElse {
+            file.delete()
+            return null
+        }
+        if (runCatching { SoundFontLoader.load(bytes) }.isFailure) {
+            soundFontDir().deleteRecursively()
+            return null
+        }
+        val name = runCatching { soundFontNameFile().readText().trim() }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: "SoundFont.sf2"
+        return file to name
     }
 
     fun autosaveLabel(): String = when (val s = _autosave.value) {
