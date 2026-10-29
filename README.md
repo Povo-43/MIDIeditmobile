@@ -34,7 +34,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ユニットテストは MIDI のラウンドトリップ、ランニングステータス、テンポ・拍子の保持、
 META（著作権・キー・テキスト）の往復、スナップ／3連符、テンポ・拍子マップ、
-同梱 SoundFont のパースなど **30 件**を収録しています。
+同梱 SoundFont のパースなど **33 件**を収録しています。
 
 ### GitHub Actions によるリリース
 
@@ -296,7 +296,7 @@ SF3 / Ogg 圧縮、ステレオペア、モジュレータ、フィルタ、LFO 
 このリポジトリでは以下を確認済みです。
 
 ```text
-./gradlew :app:testDebugUnitTest   BUILD SUCCESSFUL  (30 tests, 0 failures)
+./gradlew :app:testDebugUnitTest   BUILD SUCCESSFUL  (33 tests, 0 failures)
 ./gradlew :app:assembleDebug       BUILD SUCCESSFUL
 aapt2 dump badging                 パッケージ / minSdk 26 / targetSdk 34 を確認
 ```
