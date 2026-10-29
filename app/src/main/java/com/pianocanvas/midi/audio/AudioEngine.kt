@@ -27,7 +27,6 @@ class AudioEngine(private val context: Context) {
     val status: StateFlow<AudioStatus> = _status.asStateFlow()
 
     @Volatile private var synth: PianoSynth? = null
-    private var loadedBytes: ByteArray? = null
     private var loadToken = 0
 
     fun loadBundled() {
@@ -36,7 +35,7 @@ class AudioEngine(private val context: Context) {
         scope.launch {
             try {
                 val bytes = context.assets.open("piano.sf2").use { it.readBytes() }
-                install(bytes, token)
+                install(SoundFontLoader.load(bytes), token)
             } catch (t: Throwable) {
                 if (token == loadToken) {
                     _status.value = AudioStatus.Failed("音源を読み込めません: ${t.message ?: t.javaClass.simpleName}")
@@ -50,8 +49,8 @@ class AudioEngine(private val context: Context) {
         _status.value = AudioStatus.Loading
         scope.launch {
             try {
-                val bytes = file.readBytes()
-                install(bytes, token)
+                // Stream from disk instead of holding the whole bank in heap.
+                install(SoundFontLoader.load(file), token)
             } catch (t: Throwable) {
                 if (token == loadToken) {
                     _status.value = AudioStatus.Failed("SoundFontを読み込めません: ${t.message ?: t.javaClass.simpleName}")
@@ -60,8 +59,7 @@ class AudioEngine(private val context: Context) {
         }
     }
 
-    private fun install(bytes: ByteArray, token: Int) {
-        val font = SoundFontLoader.load(bytes)
+    private fun install(font: SoundFont, token: Int) {
         if (token != loadToken) return
         val newSynth = try {
             PianoSynth(font)
@@ -73,7 +71,6 @@ class AudioEngine(private val context: Context) {
         }
         val old = synth
         synth = newSynth
-        loadedBytes = bytes
         _status.value = AudioStatus.Ready(font.name, font.presetName, font.regionCount)
         old?.allNotesOff()
         old?.close()

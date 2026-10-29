@@ -46,7 +46,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-private const val MAX_SOUNDFONT_BYTES = 96 * 1024 * 1024
+// Only guards against runaway copies; the real ceiling for a bank is its
+// decoded sample size, which SoundFontLoader derives from the app heap.
+private const val MAX_SOUNDFONT_FILE_BYTES = 1L * 1024 * 1024 * 1024
 
 enum class HoverZone { EMPTY, NOTE_BODY, NOTE_START, NOTE_END }
 
@@ -952,13 +954,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 runCatching {
                     val (name, _) = queryMeta(app.contentResolver, uri)
                     val displayName = name?.takeIf { it.isNotBlank() } ?: "SoundFont.sf2"
-                    val bytes = app.contentResolver.openInputStream(uri)?.use {
-                        readLimited(it, MAX_SOUNDFONT_BYTES)
-                    } ?: throw IOException("ファイルを開けません")
-                    if (bytes.isEmpty()) throw IOException("ファイルが空です")
-                    // Validate before replacing a working font.
-                    SoundFontLoader.load(bytes)
-                    storeSoundFont(bytes, displayName)
+                    val stream = app.contentResolver.openInputStream(uri)
+                        ?: throw IOException("ファイルを開けません")
+                    // Streamed to disk and validated there: the bank does not
+                    // have to fit in heap just to be installed.
+                    stream.use { storeSoundFont(it, displayName) }
                     displayName
                 }
             }
@@ -1172,15 +1172,40 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private fun soundFontNameFile(): File = File(soundFontDir(), "custom.name")
 
     /**
-     * Copies the chosen SF2 into app-private storage so it survives restarts.
+     * Streams the chosen SF2 into app-private storage so it survives restarts.
      * The original file on the device is never touched.
+     *
+     * The copy is written to `custom.tmp`, parsed there and only then swapped
+     * in, so a broken or oversized bank leaves the working font untouched and
+     * a large file never has to fit in memory twice.
      */
-    private fun storeSoundFont(bytes: ByteArray, displayName: String): File {
+    private fun storeSoundFont(input: InputStream, displayName: String): File {
         val dir = soundFontDir()
         val temp = File(dir, "custom.tmp")
-        temp.writeBytes(bytes)
+        try {
+            temp.outputStream().use { out ->
+                val buffer = ByteArray(256 * 1024)
+                var total = 0L
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    total += n
+                    if (total > MAX_SOUNDFONT_FILE_BYTES) {
+                        throw IOException("ファイルが大きすぎます")
+                    }
+                    out.write(buffer, 0, n)
+                }
+            }
+            if (temp.length() == 0L) throw IOException("ファイルが空です")
+            // Validate the copy before replacing a working font.
+            SoundFontLoader.load(temp)
+        } catch (t: Throwable) {
+            temp.delete()
+            throw t
+        }
         val target = File(dir, "custom.sf2")
         if (target.exists() && !target.delete()) {
+            temp.delete()
             throw IOException("既存のSoundFontを置き換えられません")
         }
         if (!temp.renameTo(target)) {
@@ -1195,11 +1220,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private fun loadStoredSoundFont(): Pair<File, String>? {
         val file = soundFontFile()
         if (!file.isFile || file.length() == 0L) return null
-        val bytes = runCatching { file.readBytes() }.getOrElse {
-            file.delete()
-            return null
-        }
-        if (runCatching { SoundFontLoader.load(bytes) }.isFailure) {
+        if (runCatching { SoundFontLoader.load(file) }.isFailure) {
             soundFontDir().deleteRecursively()
             return null
         }
