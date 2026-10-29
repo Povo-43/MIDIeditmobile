@@ -1,6 +1,9 @@
 package com.pianocanvas.midi.audio
 
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.RandomAccessFile
+import kotlin.math.min
 import kotlin.math.pow
 
 class SoundFontException(message: String) : Exception(message)
@@ -53,61 +56,111 @@ class SoundFont(
 
 object SoundFontLoader {
 
-    private const val MAX_BYTES = 96 * 1024 * 1024
-    private const val MAX_SAMPLES = 40_000_000
+    /**
+     * The whole bank has to stay resident: the synth reaches into arbitrary
+     * sample offsets while rendering, so samples cannot be streamed during
+     * playback. Loaded samples live in a single [ShortArray] (2 bytes each),
+     * which makes the usable size a function of the app heap rather than of
+     * the file format. `android:largeHeap` is enabled, and the budget below is
+     * half of whatever the process is actually allowed to allocate.
+     */
+    private const val HEAP_BUDGET_FRACTION = 0.45
+    private const val ABSOLUTE_MAX_SAMPLE_BYTES = 512L * 1024 * 1024
+    private const val ABSOLUTE_MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024
 
-    fun load(bytes: ByteArray): SoundFont {
-        if (bytes.size < 12) throw SoundFontException("SoundFontファイルが短すぎます")
-        if (bytes.size > MAX_BYTES) throw SoundFontException("SoundFontが大きすぎます (最大96MB)")
-        if (readAscii(bytes, 0, 4) != "RIFF") throw SoundFontException("RIFFヘッダがありません")
-        if (readAscii(bytes, 8, 4) != "sfbk") throw SoundFontException("SoundFont (sfbk) ではありません")
+    internal fun maxSampleBytes(heapBytes: Long = Runtime.getRuntime().maxMemory()): Long {
+        val budget = (heapBytes.toDouble() * HEAP_BUDGET_FRACTION).toLong()
+        return budget.coerceIn(1L, ABSOLUTE_MAX_SAMPLE_BYTES)
+    }
 
-        var infoName: String? = null
-        var smpl: ByteArray? = null
-        val hydra = HashMap<String, ByteArray>()
+    private fun megabytes(bytes: Long): String =
+        "%.0fMB".format(java.util.Locale.JAPAN, bytes / 1024.0 / 1024.0)
 
-        fun parseList(start: Int, end: Int) {
-            if (start + 4 > end) return
-            val type = readAscii(bytes, start, 4)
-            var p = start + 4
-            while (p + 8 <= end) {
-                val id = readAscii(bytes, p, 4)
-                val size = readIntLE(bytes, p + 4)
-                if (size < 0 || p + 8 + size > end) throw SoundFontException("壊れたチャンク: $id")
-                val dataStart = p + 8
-                when {
-                    type == "INFO" && id == "INAM" -> {
-                        infoName = readFixedString(bytes, dataStart, size)
-                    }
-                    type == "sdta" && id == "smpl" -> smpl = bytes.copyOfRange(dataStart, dataStart + size)
-                    type == "pdta" -> hydra[id] = bytes.copyOfRange(dataStart, dataStart + size)
-                }
-                p += 8 + size + (size and 1)
-            }
+    internal fun requireSampleBudget(sampleCount: Int, budgetBytes: Long = maxSampleBytes()) {
+        val needed = sampleCount.toLong() * 2L
+        if (needed > budgetBytes) {
+            throw SoundFontException(
+                "サンプルが大きすぎます: 約${megabytes(needed)}必要ですが、" +
+                    "この端末で読み込めるのは約${megabytes(budgetBytes)}までです"
+            )
         }
+    }
 
-        var p = 12
-        while (p + 8 <= bytes.size) {
-            val id = readAscii(bytes, p, 4)
-            val size = readIntLE(bytes, p + 4)
-            if (size < 0 || p + 8 + size > bytes.size) throw SoundFontException("壊れたRIFFチャンク")
-            if (id == "LIST") parseList(p + 8, p + 8 + size)
+    /** Random access over either an in-memory file or a real file on disk. */
+    private interface Source {
+        val size: Long
+        fun readFully(offset: Long, into: ByteArray, length: Int)
+    }
+
+    private class ByteArraySource(private val bytes: ByteArray) : Source {
+        override val size: Long get() = bytes.size.toLong()
+        override fun readFully(offset: Long, into: ByteArray, length: Int) {
+            if (offset < 0 || offset + length > bytes.size) {
+                throw SoundFontException("SoundFontデータが壊れています")
+            }
+            System.arraycopy(bytes, offset.toInt(), into, 0, length)
+        }
+    }
+
+    private class FileSource(private val file: RandomAccessFile) : Source {
+        override val size: Long get() = file.length()
+        override fun readFully(offset: Long, into: ByteArray, length: Int) {
+            if (offset < 0 || offset + length > size) {
+                throw SoundFontException("SoundFontデータが壊れています")
+            }
+            file.seek(offset)
+            file.readFully(into, 0, length)
+        }
+    }
+
+    private class Parts {
+        var infoName: String? = null
+        var sampleOffset = -1L
+        var sampleBytes = 0
+        val hydra = HashMap<String, ByteArray>()
+    }
+
+    fun load(bytes: ByteArray): SoundFont = load(ByteArraySource(bytes))
+
+    /**
+     * Streams the bank from disk: only the small `pdta`/`INFO` chunks are held
+     * in memory next to the decoded samples, so a large file no longer costs
+     * its own size in heap while it is being parsed.
+     */
+    fun load(file: File): SoundFont = RandomAccessFile(file, "r").use { load(FileSource(it)) }
+
+    private fun load(source: Source): SoundFont {
+        if (source.size < 12) throw SoundFontException("SoundFontファイルが短すぎます")
+        if (source.size > ABSOLUTE_MAX_FILE_BYTES) throw SoundFontException("SoundFontファイルが大きすぎます")
+
+        val head = ByteArray(12)
+        source.readFully(0, head, 12)
+        if (readAscii(head, 0, 4) != "RIFF") throw SoundFontException("RIFFヘッダがありません")
+        if (readAscii(head, 8, 4) != "sfbk") throw SoundFontException("SoundFont (sfbk) ではありません")
+
+        val parts = Parts()
+        var p = 12L
+        while (p + 8 <= source.size) {
+            val chunkHead = ByteArray(8)
+            source.readFully(p, chunkHead, 8)
+            val id = readAscii(chunkHead, 0, 4)
+            val size = readIntLE(chunkHead, 4)
+            if (size < 0 || p + 8 + size > source.size) throw SoundFontException("壊れたRIFFチャンク")
+            if (id == "LIST") parseList(source, p + 8, p + 8 + size, parts)
             p += 8 + size + (size and 1)
         }
 
-        val smplBytes = smpl ?: throw SoundFontException(
+        if (parts.sampleOffset < 0) throw SoundFontException(
             "SF2のサンプルデータがありません (SF3/Ogg形式には対応していません)"
         )
-        if (smplBytes.size % 2 != 0) throw SoundFontException("サンプルデータが壊れています")
-        val sampleCount = smplBytes.size / 2
-        if (sampleCount > MAX_SAMPLES) throw SoundFontException("サンプル数が多すぎます")
-        val samples = ShortArray(sampleCount)
-        var si = 0
-        var bi = 0
-        while (bi + 1 < smplBytes.size) {
-            samples[si++] = ((smplBytes[bi].toInt() and 0xFF) or (smplBytes[bi + 1].toInt() shl 8)).toShort()
-            bi += 2
-        }
+        if (parts.sampleBytes % 2 != 0) throw SoundFontException("サンプルデータが壊れています")
+        val sampleCount = parts.sampleBytes / 2
+        // Reject oversized banks before allocating anything for them.
+        requireSampleBudget(sampleCount)
+        val samples = readSamples(source, parts.sampleOffset, sampleCount)
+
+        val hydra = parts.hydra
+        val infoName = parts.infoName
 
         val phdr = hydra["phdr"] ?: throw SoundFontException("phdrがありません")
         val pbag = hydra["pbag"] ?: throw SoundFontException("pbagがありません")
@@ -322,6 +375,70 @@ object SoundFontLoader {
     }
 
     fun load(input: ByteArrayInputStream): SoundFont = load(input.readBytes())
+
+    /** Records the sample chunk and loads the small hydra chunks; never the samples. */
+    private fun parseList(source: Source, start: Long, end: Long, parts: Parts) {
+        if (start + 4 > end) return
+        val typeBytes = ByteArray(4)
+        source.readFully(start, typeBytes, 4)
+        val type = readAscii(typeBytes, 0, 4)
+        var p = start + 4
+        while (p + 8 <= end) {
+            val chunkHead = ByteArray(8)
+            source.readFully(p, chunkHead, 8)
+            val id = readAscii(chunkHead, 0, 4)
+            val size = readIntLE(chunkHead, 4)
+            if (size < 0 || p + 8 + size > end) throw SoundFontException("壊れたチャンク: $id")
+            val dataStart = p + 8
+            when {
+                type == "INFO" && id == "INAM" -> {
+                    val data = ByteArray(size)
+                    source.readFully(dataStart, data, size)
+                    parts.infoName = readFixedString(data, 0, size)
+                }
+                // The sample chunk can be hundreds of megabytes: remember where
+                // it is instead of copying it.
+                type == "sdta" && id == "smpl" -> {
+                    parts.sampleOffset = dataStart
+                    parts.sampleBytes = size
+                }
+                type == "pdta" -> {
+                    val data = ByteArray(size)
+                    source.readFully(dataStart, data, size)
+                    parts.hydra[id] = data
+                }
+            }
+            p += 8 + size + (size and 1)
+        }
+    }
+
+    /** Decodes the sample chunk block by block so no full copy is needed. */
+    private fun readSamples(source: Source, offset: Long, sampleCount: Int): ShortArray {
+        val out = try {
+            ShortArray(sampleCount)
+        } catch (_: OutOfMemoryError) {
+            throw SoundFontException(
+                "メモリが足りずサンプルを読み込めません (約${megabytes(sampleCount.toLong() * 2)}必要)"
+            )
+        }
+        val blockSamples = 1 shl 15
+        val block = ByteArray(blockSamples * 2)
+        var index = 0
+        var pos = offset
+        while (index < sampleCount) {
+            val n = min(blockSamples, sampleCount - index)
+            source.readFully(pos, block, n * 2)
+            var b = 0
+            for (i in 0 until n) {
+                out[index + i] =
+                    ((block[b].toInt() and 0xFF) or (block[b + 1].toInt() shl 8)).toShort()
+                b += 2
+            }
+            index += n
+            pos += n.toLong() * 2
+        }
+        return out
+    }
 
     private data class SampleHeader(
         val name: String,
