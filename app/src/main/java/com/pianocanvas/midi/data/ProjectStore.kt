@@ -2,6 +2,7 @@ package com.pianocanvas.midi.data
 
 import android.content.Context
 import com.pianocanvas.midi.model.GridUnit
+import com.pianocanvas.midi.model.MidiMeta
 import com.pianocanvas.midi.model.Note
 import com.pianocanvas.midi.model.Project
 import com.pianocanvas.midi.model.RawEvent
@@ -50,7 +51,7 @@ data class AutosaveData(
  * from SAF import/export: editing never writes to the user's .mid file.
  */
 object ProjectStore {
-    private const val VERSION = 1
+    private const val VERSION = 2
     private const val MAX_FILE = 24 * 1024 * 1024
 
     private fun dir(context: Context): File = File(context.filesDir, "autosave").apply { mkdirs() }
@@ -121,11 +122,20 @@ object ProjectStore {
     fun lastSavedAt(context: Context): Long? =
         maxOf(file(context).lastModified(), backup(context).lastModified()).takeIf { it > 0 }
 
-    private fun encode(data: AutosaveData): JSONObject {
+    internal fun encode(data: AutosaveData): JSONObject {
         val p = data.project
         val root = JSONObject()
         root.put("version", VERSION)
         root.put("savedAt", data.savedAtMillis)
+        // Cheap header so the project browser can list titles without decoding
+        // every track of every stored project.
+        root.put(
+            "summary",
+            JSONObject()
+                .put("title", p.title)
+                .put("noteCount", p.tracks.sumOf { it.notes.size })
+                .put("savedAt", data.savedAtMillis),
+        )
         val project = JSONObject()
         project.put("title", p.title)
         project.put("ppq", p.ppq)
@@ -142,6 +152,7 @@ object ProjectStore {
         project.put("loopEnabled", p.loopEnabled)
         project.put("nextNoteId", p.nextNoteId)
         p.importedPathName?.let { project.put("importedPathName", it) }
+        project.put("meta", encodeMeta(p.meta))
 
         val tracks = JSONArray()
         p.tracks.forEach { t ->
@@ -181,21 +192,52 @@ object ProjectStore {
         vp.put("rowHeightDp", data.viewport.rowHeightDp)
         root.put("viewport", vp)
 
-        val prefs = JSONObject()
-        prefs.put("grid", data.prefs.grid.name)
-        prefs.put("input", data.prefs.inputDuration.name)
-        prefs.put("snap", data.prefs.snapEnabled)
-        prefs.put("velocity", data.prefs.inputVelocity)
-        prefs.put("autoScroll", data.prefs.autoScroll)
-        prefs.put("hoverToolbar", data.prefs.hoverToolbar)
-        prefs.put("fingerEditing", data.prefs.fingerEditing)
-        prefs.put("penOnlySelection", data.prefs.penOnlySelection)
-        prefs.put("showSustainLane", data.prefs.showSustainLane)
-        root.put("prefs", prefs)
+        root.put("prefs", encodePrefs(data.prefs))
         return root
     }
 
-    private fun decode(text: String): AutosaveData {
+    internal fun encodePrefs(prefs: EditorPrefs): JSONObject {
+        val json = JSONObject()
+        json.put("grid", prefs.grid.name)
+        json.put("input", prefs.inputDuration.name)
+        json.put("snap", prefs.snapEnabled)
+        json.put("velocity", prefs.inputVelocity)
+        json.put("autoScroll", prefs.autoScroll)
+        json.put("hoverToolbar", prefs.hoverToolbar)
+        json.put("fingerEditing", prefs.fingerEditing)
+        json.put("penOnlySelection", prefs.penOnlySelection)
+        json.put("showSustainLane", prefs.showSustainLane)
+        return json
+    }
+
+    private fun encodeMeta(meta: MidiMeta): JSONObject {
+        val json = JSONObject()
+        json.put("copyright", meta.copyright)
+        json.put("composer", meta.composer)
+        json.put("lyricist", meta.lyricist)
+        json.put("comment", meta.comment)
+        meta.keySignature?.let {
+            json.put("keySignature", it.coerceIn(-7, 7))
+            json.put("minor", meta.minor)
+        }
+        return json
+    }
+
+    private fun decodeMeta(json: JSONObject?): MidiMeta {
+        if (json == null) return MidiMeta()
+        return MidiMeta(
+            copyright = json.optString("copyright", ""),
+            composer = json.optString("composer", ""),
+            lyricist = json.optString("lyricist", ""),
+            comment = json.optString("comment", ""),
+            keySignature = if (json.has("keySignature") && !json.isNull("keySignature")) {
+                json.optInt("keySignature", 0).coerceIn(-7, 7)
+            } else null,
+            minor = json.optBoolean("minor", false),
+        )
+    }
+
+    internal fun decode(text: String): AutosaveData {
         val root = JSONObject(text)
         val version = root.optInt("version", 0)
         if (version > VERSION) throw JSONException("新しい形式の自動保存データです (version $version)")
@@ -280,6 +322,7 @@ object ProjectStore {
             loopEnabled = p.optBoolean("loopEnabled", false),
             nextNoteId = maxOf(p.optLong("nextNoteId", 1), (notes.maxOfOrNull { it.id } ?: 0) + 1),
             importedPathName = p.optString("importedPathName", "").takeIf { it.isNotBlank() },
+            meta = decodeMeta(p.optJSONObject("meta")),
         ).let { pr ->
             if (pr.loopEndTick <= pr.loopStartTick) pr.copy(loopEndTick = pr.loopStartTick + ppq * 4) else pr
         }
@@ -294,22 +337,24 @@ object ProjectStore {
             )
         } else ViewportState()
 
-        val pj = root.optJSONObject("prefs")
+        val prefs = decodePrefs(root.optJSONObject("prefs"))
+        return AutosaveData(project, vp, prefs, root.optLong("savedAt", 0L))
+    }
+
+    internal fun decodePrefs(json: JSONObject?): EditorPrefs {
+        if (json == null) return EditorPrefs()
         fun grid(name: String?, fallback: GridUnit): GridUnit =
             GridUnit.entries.firstOrNull { it.name == name } ?: fallback
-        val prefs = if (pj != null) {
-            EditorPrefs(
-                grid = grid(pj.optString("grid"), GridUnit.EIGHTH),
-                inputDuration = grid(pj.optString("input"), GridUnit.QUARTER),
-                snapEnabled = pj.optBoolean("snap", true),
-                inputVelocity = pj.optInt("velocity", 96).coerceIn(1, 127),
-                autoScroll = pj.optBoolean("autoScroll", true),
-                hoverToolbar = pj.optBoolean("hoverToolbar", true),
-                fingerEditing = pj.optBoolean("fingerEditing", true),
-                penOnlySelection = pj.optBoolean("penOnlySelection", false),
-                showSustainLane = pj.optBoolean("showSustainLane", false),
-            )
-        } else EditorPrefs()
-        return AutosaveData(project, vp, prefs, root.optLong("savedAt", 0L))
+        return EditorPrefs(
+            grid = grid(json.optString("grid"), GridUnit.EIGHTH),
+            inputDuration = grid(json.optString("input"), GridUnit.QUARTER),
+            snapEnabled = json.optBoolean("snap", true),
+            inputVelocity = json.optInt("velocity", 96).coerceIn(1, 127),
+            autoScroll = json.optBoolean("autoScroll", true),
+            hoverToolbar = json.optBoolean("hoverToolbar", true),
+            fingerEditing = json.optBoolean("fingerEditing", true),
+            penOnlySelection = json.optBoolean("penOnlySelection", false),
+            showSustainLane = json.optBoolean("showSustainLane", false),
+        )
     }
 }

@@ -103,7 +103,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
-private fun AppDialog(
+internal fun AppDialog(
     title: String,
     onDismiss: () -> Unit,
     subtitle: String? = null,
@@ -972,7 +972,7 @@ private fun SourceBadge() {
 }
 
 @Composable
-private fun SectionTitle(text: String, icon: ImageVector) {
+internal fun SectionTitle(text: String, icon: ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             icon,
@@ -997,7 +997,7 @@ private fun SettingLabel(text: String) {
 }
 
 @Composable
-private fun GridUnitChips(
+internal fun GridUnitChips(
     selected: GridUnit?,
     includeOff: Boolean,
     onSelect: (GridUnit) -> Unit,
@@ -1111,11 +1111,25 @@ fun HelpDialog(onDismiss: () -> Unit) {
             "保存とMIDI",
             Icons.Rounded.Save,
             listOf(
-                "編集は自動保存され、次回起動時に復元されます。",
+                "プロジェクトは自動保存され、複数をタブで開いたまま切り替えられます。",
+                "「プロジェクトを開く」から保存済みのプロジェクトを開く・名前変更・削除できます。",
                 "MIDI書き出しは Storage Access Framework の保存先へ行います。",
+                "「共有」で書き出した .mid を Android の共有先 (メール・クラウド等) へ送れます。",
                 "読み込んだMIDIの他トラックは、編集していないイベントも含めて書き出し時に保持されます。",
-                "テンポと拍子は曲の先頭イベントとして更新されます。",
+                "「MIDI META 設定」で著作権・キー・作曲者などのテキストを編集できます。",
                 "設定の「音源」から端末の SF2 ファイルを選べます。選んだファイルはアプリ内に保存され、次回起動時も使われます。",
+            ),
+        )
+        Spacer(Modifier.height(12.dp))
+        HelpSection(
+            "キーボード / MIDI入力",
+            Icons.Rounded.Tune,
+            listOf(
+                "スペース: 再生/一時停止。R: MIDI入力の録音 ON/OFF。L: ループ。Esc: 停止/選択解除。",
+                "Ctrl+Z / Ctrl+Shift+Z: 元に戻す / やり直す。Ctrl+C / X / V: コピー / カット / 貼り付け。",
+                "Ctrl+A: 全選択。Ctrl+D: 複製。Delete: 選択を削除。Ctrl+S: 保存。Ctrl+Shift+S: 共有。",
+                "矢印: 選択ノートを移動 / 移調 (Shiftでオクターブ)。Ctrl+Tab: タブ切替。Ctrl+= / Ctrl+- / Ctrl+0: ズーム / 全体表示。",
+                "USB / Bluetooth LE MIDIキーボードは自動で接続されます。再生しながら弾くと再生位置に録音されます。",
             ),
         )
     }
@@ -1216,7 +1230,7 @@ fun ConfirmNewDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
 // ----------------------------------------------------------------------
 
 @Composable
-private fun DialogPrimaryButton(
+internal fun DialogPrimaryButton(
     text: String,
     icon: ImageVector,
     enabled: Boolean = true,
@@ -1230,7 +1244,7 @@ private fun DialogPrimaryButton(
 }
 
 @Composable
-private fun DialogSecondaryButton(
+internal fun DialogSecondaryButton(
     text: String,
     icon: ImageVector,
     onClick: () -> Unit,
@@ -1243,7 +1257,7 @@ private fun DialogSecondaryButton(
 }
 
 @Composable
-private fun StepSquare(label: String, onClick: () -> Unit) {
+internal fun StepSquare(label: String, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         modifier = Modifier.size(48.dp),

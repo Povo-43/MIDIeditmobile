@@ -1,5 +1,6 @@
 package com.pianocanvas.midi.midi
 
+import com.pianocanvas.midi.model.MidiMeta
 import com.pianocanvas.midi.model.Note
 import com.pianocanvas.midi.model.Project
 import com.pianocanvas.midi.model.RawEvent
@@ -309,6 +310,57 @@ class MidiFileTest {
         assertEquals(0xF7, restored.status)
         assertEquals(240, restored.tick)
         assertEquals(listOf(0x43, 0x12, 0xF7), restored.data.toList())
+    }
+
+    @Test
+    fun metaEventsRoundTripWithoutDuplicateText() {
+        val meta = MidiMeta(
+            copyright = "© 2026 Pianocanvas",
+            composer = "Composer",
+            lyricist = "Lyricist",
+            comment = "Comment",
+            keySignature = -3,
+            minor = true,
+        )
+        val project = Project.empty().copy(
+            title = "Meta",
+            meta = meta,
+            tracks = listOf(
+                Track(
+                    name = "Piano",
+                    channel = 0,
+                    notes = listOf(Note(id = 1, pitch = 60, startTick = 0, durationTicks = 480)),
+                )
+            ),
+        )
+        val parsed = MidiFile.parse(MidiFile.write(project), "meta").project
+        assertEquals("© 2026 Pianocanvas", parsed.meta.copyright)
+        assertEquals("Composer", parsed.meta.composer)
+        assertEquals("Lyricist", parsed.meta.lyricist)
+        assertEquals("Comment", parsed.meta.comment)
+        assertEquals(-3, parsed.meta.keySignature)
+        assertTrue(parsed.meta.minor)
+
+        // Re-saving must not accumulate text events.
+        val again = MidiFile.parse(MidiFile.write(parsed), "meta2").project
+        val texts = again.tracks.first().rawEvents
+            .filter { it.isMeta && it.metaType == 0x01 && it.tick == 0 }
+        assertEquals(3, texts.size)
+        assertEquals("Composer", again.meta.composer)
+    }
+
+    @Test
+    fun clearingMetaRemovesManagedEvents() {
+        val withMeta = Project.empty().copy(
+            meta = MidiMeta(copyright = "X", composer = "Y", keySignature = 2),
+        )
+        val parsed = MidiFile.parse(MidiFile.write(withMeta), "meta").project
+        val cleared = MidiFile.parse(MidiFile.write(parsed.copy(meta = MidiMeta())), "clear").project
+        assertTrue(cleared.meta.isEmpty)
+        val managed = cleared.tracks.first().rawEvents.filter {
+            it.isMeta && it.tick == 0 && (it.metaType == 0x01 || it.metaType == 0x02 || it.metaType == 0x59)
+        }
+        assertTrue(managed.isEmpty())
     }
 
     private fun midiFile(format: Int, trackData: ByteArray, ppq: Int = 480): ByteArray {

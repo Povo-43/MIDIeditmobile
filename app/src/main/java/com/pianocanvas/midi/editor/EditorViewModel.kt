@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.view.KeyEvent
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pianocanvas.midi.audio.AudioEngine
@@ -12,10 +14,16 @@ import com.pianocanvas.midi.audio.PlaybackEngine
 import com.pianocanvas.midi.audio.SoundFontLoader
 import com.pianocanvas.midi.data.AutosaveData
 import com.pianocanvas.midi.data.EditorPrefs
-import com.pianocanvas.midi.data.ProjectStore
+import com.pianocanvas.midi.data.ProjectRepository
+import com.pianocanvas.midi.data.ProjectSummary
 import com.pianocanvas.midi.data.ViewportState
+import com.pianocanvas.midi.data.WorkspaceState
+import com.pianocanvas.midi.midi.MidiDeviceOption
 import com.pianocanvas.midi.midi.MidiFile
+import com.pianocanvas.midi.midi.MidiInputEvent
+import com.pianocanvas.midi.midi.MidiInputManager
 import com.pianocanvas.midi.model.GridUnit
+import com.pianocanvas.midi.model.MidiMeta
 import com.pianocanvas.midi.model.Note
 import com.pianocanvas.midi.model.Project
 import com.pianocanvas.midi.model.TimeSignature
@@ -26,9 +34,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
@@ -87,6 +98,39 @@ data class BusyState(
     val soundFont: Boolean = false,
 )
 
+/** One entry in the tab bar. */
+data class TabInfo(
+    val id: String,
+    val title: String,
+    val active: Boolean,
+    val noteCount: Int,
+)
+
+/** USB / BLE MIDI keyboard status for the input dialog and top bar. */
+data class MidiUiState(
+    val supported: Boolean = true,
+    val devices: List<MidiDeviceOption> = emptyList(),
+    val connectedName: String? = null,
+    val recording: Boolean = false,
+) {
+    val connected: Boolean get() = connectedName != null
+}
+
+/** Commands that need a host Activity (SAF pickers, share sheet). */
+sealed interface UiCommand {
+    data object ImportMidi : UiCommand
+    data object ExportMidi : UiCommand
+    data class Share(val uri: Uri, val mimeType: String, val title: String) : UiCommand
+}
+
+/** Commands handled inside the piano-roll composable. */
+sealed interface ViewCommand {
+    data object ZoomIn : ViewCommand
+    data object ZoomOut : ViewCommand
+    data object Fit : ViewCommand
+    data class ScrollBars(val delta: Int) : ViewCommand
+}
+
 data class EditorUiState(
     val project: Project?,
     val selection: Set<Long>,
@@ -103,6 +147,10 @@ data class EditorUiState(
     val trackPickerVisible: Boolean,
     val soundFontCustom: Boolean,
     val soundFontFileName: String?,
+    val tabs: List<TabInfo>,
+    val midi: MidiUiState,
+    val projects: List<ProjectSummary>,
+    val projectsLoading: Boolean,
 )
 
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
@@ -126,12 +174,26 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _soundFontCustom = MutableStateFlow(false)
     private val _soundFontFileName = MutableStateFlow<String?>(null)
     private val _inspectorNoteId = MutableStateFlow<Long?>(null)
+    private val _tabs = MutableStateFlow<List<TabState>>(emptyList())
+    private val _activeTabIndex = MutableStateFlow(0)
+    private val _midiRecording = MutableStateFlow(false)
+    private val _projectList = MutableStateFlow<List<ProjectSummary>>(emptyList())
+    private val _projectsLoading = MutableStateFlow(false)
+    private val _projectBrowserVisible = MutableStateFlow(false)
     private val messages = Channel<String>(Channel.BUFFERED)
+
+    private val _uiCommands = MutableSharedFlow<UiCommand>(extraBufferCapacity = 8)
+    private val _viewCommands = MutableSharedFlow<ViewCommand>(extraBufferCapacity = 16)
 
     val messageFlow = messages.receiveAsFlow()
     val hover: StateFlow<HoverInfo?> = _hover.asStateFlow()
     val inspectorNoteId: StateFlow<Long?> = _inspectorNoteId.asStateFlow()
     val audioStatus: StateFlow<AudioStatus> = audio.status
+    val uiCommands: SharedFlow<UiCommand> = _uiCommands.asSharedFlow()
+    val viewCommands: SharedFlow<ViewCommand> = _viewCommands.asSharedFlow()
+    val projectBrowserVisible: StateFlow<Boolean> = _projectBrowserVisible.asStateFlow()
+
+    private val midiInput = MidiInputManager(application)
 
     private val undoStack = ArrayDeque<EditSnapshot>()
     private val redoStack = ArrayDeque<EditSnapshot>()
@@ -142,11 +204,30 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var pendingImport: Uri? = null
     private val previewJobs = HashMap<Int, Job>()
 
+    /** Pitches currently held down by an external keyboard while recording. */
+    private val midiPendingNotes = HashMap<Int, MidiNoteStart>()
+    private var midiRecordUndoPushed = false
+
+    private data class MidiNoteStart(val startTick: Int, val velocity: Int)
+
     private data class EditSnapshot(
         val notes: List<Note>,
         val bpm: Double,
         val timeSignature: TimeSignature,
         val timeSignatures: List<TimeSignaturePoint>,
+        val meta: MidiMeta,
+    )
+
+    /** A project open in a tab, together with its own editor history. */
+    private data class TabState(
+        val id: String,
+        val project: Project,
+        val selection: Set<Long>,
+        val viewport: ViewportState,
+        val undo: List<EditSnapshot>,
+        val redo: List<EditSnapshot>,
+        val clipboard: List<Note>,
+        val clipboardBaseTick: Int,
     )
 
     private data class CoreState(
@@ -173,6 +254,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val soundFontFileName: String?,
     )
 
+    private data class TabsState(
+        val tabs: List<TabInfo>,
+        val projects: List<ProjectSummary>,
+        val loading: Boolean,
+    )
+
+    private data class MidiState(
+        val supported: Boolean,
+        val devices: List<MidiDeviceOption>,
+        val connectedName: String?,
+        val recording: Boolean,
+    )
+
     private val coreFlow = combine(
         _project, _selection, _prefs, _viewport, _viewportEpoch
     ) { project, selection, prefs, viewport, epoch ->
@@ -195,45 +289,80 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         RuntimeState(audioStatus, playing, picker, custom, fileName)
     }
 
-    val uiState: StateFlow<EditorUiState> = combine(coreFlow, metaFlow, runtimeFlow) { c, m, r ->
-        EditorUiState(
-            project = c.project,
-            selection = c.selection,
-            prefs = c.prefs,
-            viewport = c.viewport,
-            viewportEpoch = c.viewportEpoch,
-            canUndo = m.canUndo,
-            canRedo = m.canRedo,
-            autosave = m.autosave,
-            boot = m.boot,
-            audio = r.audio,
-            isPlaying = r.isPlaying,
-            busy = m.busy,
-            trackPickerVisible = r.trackPickerVisible,
-            soundFontCustom = r.soundFontCustom,
-            soundFontFileName = r.soundFontFileName,
+    // The active tab's live project overrides the stale snapshot so titles and
+    // note counts in the tab bar update as the user edits.
+    private val tabsFlow = combine(
+        _tabs, _activeTabIndex, _project, _projectList, _projectsLoading
+    ) { tabs, active, live, projects, loading ->
+        TabsState(
+            tabs = tabs.mapIndexed { i, tab ->
+                val isActive = i == active
+                TabInfo(
+                    id = tab.id,
+                    title = if (isActive && live != null) live.title else tab.project.title,
+                    active = isActive,
+                    noteCount = if (isActive && live != null) live.notes.size else tab.project.notes.size,
+                )
+            },
+            projects = projects,
+            loading = loading,
         )
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.Eagerly,
-        EditorUiState(
-            project = null,
-            selection = emptySet(),
-            prefs = EditorPrefs(),
-            viewport = ViewportState(),
-            viewportEpoch = 0,
-            canUndo = false,
-            canRedo = false,
-            autosave = AutosaveState.Idle,
-            boot = BootState.Loading,
-            audio = AudioStatus.Loading,
-            isPlaying = false,
-            busy = BusyState(),
-            trackPickerVisible = false,
-            soundFontCustom = false,
-            soundFontFileName = null,
+    }
+
+    private val midiFlow = combine(
+        midiInput.devices, midiInput.connectedDeviceName, _midiRecording
+    ) { devices, connected, recording ->
+        MidiState(midiInput.supported, devices, connected, recording)
+    }
+
+    val uiState: StateFlow<EditorUiState> =
+        combine(coreFlow, metaFlow, runtimeFlow, tabsFlow, midiFlow) { c, m, r, t, midi ->
+            EditorUiState(
+                project = c.project,
+                selection = c.selection,
+                prefs = c.prefs,
+                viewport = c.viewport,
+                viewportEpoch = c.viewportEpoch,
+                canUndo = m.canUndo,
+                canRedo = m.canRedo,
+                autosave = m.autosave,
+                boot = m.boot,
+                audio = r.audio,
+                isPlaying = r.isPlaying,
+                busy = m.busy,
+                trackPickerVisible = r.trackPickerVisible,
+                soundFontCustom = r.soundFontCustom,
+                soundFontFileName = r.soundFontFileName,
+                tabs = t.tabs,
+                midi = MidiUiState(midi.supported, midi.devices, midi.connectedName, midi.recording),
+                projects = t.projects,
+                projectsLoading = t.loading,
+            )
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            EditorUiState(
+                project = null,
+                selection = emptySet(),
+                prefs = EditorPrefs(),
+                viewport = ViewportState(),
+                viewportEpoch = 0,
+                canUndo = false,
+                canRedo = false,
+                autosave = AutosaveState.Idle,
+                boot = BootState.Loading,
+                audio = AudioStatus.Loading,
+                isPlaying = false,
+                busy = BusyState(),
+                trackPickerVisible = false,
+                soundFontCustom = false,
+                soundFontFileName = null,
+                tabs = emptyList(),
+                midi = MidiUiState(),
+                projects = emptyList(),
+                projectsLoading = false,
+            )
         )
-    )
 
     init {
         viewModelScope.launch {
@@ -246,32 +375,22 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 audio.loadBundled()
             }
         }
+        midiInput.start()
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { ProjectStore.load(app) }
-            result.fold(
-                onSuccess = { data ->
-                    if (data != null) {
-                        restore(data)
-                    } else {
-                        _boot.value = BootState.Ready(false)
-                        autosaveEnabled = true
-                        runPendingImport()
-                    }
-                },
-                onFailure = { t ->
-                    _boot.value = BootState.Ready(false)
-                    autosaveEnabled = true
-                    postMessage("自動保存を復元できませんでした: ${t.message ?: t.javaClass.simpleName}")
-                    runPendingImport()
-                }
-            )
+            midiInput.events.collect { handleMidiInput(it) }
         }
+        viewModelScope.launch { restoreWorkspace() }
         viewModelScope.launch {
             combine(_project, _prefs, _viewport) { p, pr, v -> Triple(p, pr, v) }
                 .drop(1)
                 .collect {
                     if (autosaveEnabled && _project.value != null) scheduleAutosave()
                 }
+        }
+        viewModelScope.launch {
+            combine(_prefs, _tabs, _activeTabIndex) { pr, tabs, active -> Triple(pr, tabs, active) }
+                .drop(1)
+                .collect { persistWorkspace() }
         }
     }
 
@@ -838,18 +957,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun newProject() {
-        playback.stop()
-        undoStack.clear()
-        redoStack.clear()
-        updateHistoryCounts()
-        _selection.value = emptySet()
-        _hover.value = null
-        _trackPickerVisible.value = false
-        _project.value = Project.empty()
-        _viewport.value = ViewportState()
-        _viewportEpoch.value++
-        autosaveEnabled = true
-        playback.setProject(_project.value!!)
+        val id = ProjectRepository.newId()
+        val project = Project.empty()
+        openTab(TabState(id, project, emptySet(), ViewportState(), emptyList(), emptyList(), emptyList(), 0))
+        saveNow()
         postMessage("新しいプロジェクトを作成しました")
     }
 
@@ -858,6 +969,184 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val clean = title.trim().take(80).ifBlank { "無題" }
         if (clean == p.title) return
         _project.value = p.copy(title = clean)
+        scheduleAutosave()
+    }
+
+    // ---------------------------------------------------------------------
+    // Tabs
+    // ---------------------------------------------------------------------
+
+    /** Snapshot of the currently live tab. */
+    private fun captureActiveTab(): TabState? {
+        val project = _project.value ?: return null
+        val id = _tabs.value.getOrNull(_activeTabIndex.value)?.id ?: return null
+        return TabState(
+            id = id,
+            project = project,
+            selection = _selection.value,
+            viewport = _viewport.value,
+            undo = undoStack.toList(),
+            redo = redoStack.toList(),
+            clipboard = clipboard,
+            clipboardBaseTick = clipboardBaseTick,
+        )
+    }
+
+    /** Stores the live editor state back into the tab list. */
+    private fun commitActiveTab() {
+        val index = _activeTabIndex.value
+        val snapshot = captureActiveTab() ?: return
+        val tabs = _tabs.value.toMutableList()
+        if (index in tabs.indices) {
+            tabs[index] = snapshot
+            _tabs.value = tabs
+        }
+    }
+
+    private fun openTab(tab: TabState) {
+        commitActiveTab()
+        val tabs = _tabs.value + tab
+        _tabs.value = tabs
+        activateTab(tabs.lastIndex)
+    }
+
+    fun switchTab(index: Int) {
+        if (index == _activeTabIndex.value) return
+        commitActiveTab()
+        val outgoing = _tabs.value.getOrNull(_activeTabIndex.value)
+        if (outgoing != null) persistTab(outgoing)
+        activateTab(index)
+    }
+
+    fun closeTab(index: Int) {
+        val tabs = _tabs.value.toMutableList()
+        if (index !in tabs.indices) return
+        val closingActive = index == _activeTabIndex.value
+        // Capture the active tab first so a non-active close cannot persist a
+        // stale copy over edits that autosave has already written.
+        val liveSnapshot = captureActiveTab()
+        val closing = if (closingActive && liveSnapshot != null) liveSnapshot else tabs[index]
+        tabs.removeAt(index)
+        _tabs.value = tabs
+        viewModelScope.launch { persistTabNow(closing) }
+
+        if (tabs.isEmpty()) {
+            playback.stop()
+            audio.allNotesOff()
+            undoStack.clear()
+            redoStack.clear()
+            updateHistoryCounts()
+            clipboard = emptyList()
+            _selection.value = emptySet()
+            _hover.value = null
+            _inspectorNoteId.value = null
+            _project.value = null
+            _trackPickerVisible.value = false
+            _activeTabIndex.value = 0
+            return
+        }
+        if (closingActive) {
+            activateTab(index.coerceAtMost(tabs.lastIndex))
+        } else {
+            val adjusted = if (_activeTabIndex.value > index) _activeTabIndex.value - 1 else _activeTabIndex.value
+            _activeTabIndex.value = adjusted
+        }
+    }
+
+    fun closeActiveTab() = closeTab(_activeTabIndex.value)
+
+    private fun activateTab(index: Int) {
+        val tabs = _tabs.value
+        if (index !in tabs.indices) return
+        val tab = tabs[index]
+        playback.stop()
+        audio.allNotesOff()
+        _hover.value = null
+        _inspectorNoteId.value = null
+        _activeTabIndex.value = index
+        _project.value = tab.project
+        _selection.value = tab.selection
+        _viewport.value = tab.viewport
+        _viewportEpoch.value++
+        undoStack.clear()
+        undoStack.addAll(tab.undo)
+        redoStack.clear()
+        redoStack.addAll(tab.redo)
+        clipboard = tab.clipboard
+        clipboardBaseTick = tab.clipboardBaseTick
+        updateHistoryCounts()
+        playback.setProject(tab.project)
+        autosaveEnabled = true
+        _autosave.value = AutosaveState.Idle
+    }
+
+    // ---------------------------------------------------------------------
+    // Project browser
+    // ---------------------------------------------------------------------
+
+    fun refreshProjects() {
+        _projectsLoading.value = true
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { ProjectRepository.list(app) }
+            _projectList.value = list
+            _projectsLoading.value = false
+        }
+    }
+
+    fun openProject(id: String) {
+        val existing = _tabs.value.indexOfFirst { it.id == id }
+        if (existing >= 0) {
+            switchTab(existing)
+            return
+        }
+        viewModelScope.launch {
+            val data = withContext(Dispatchers.IO) { ProjectRepository.load(app, id) }
+                .getOrNull() ?: run {
+                    postMessage("プロジェクトを開けませんでした")
+                    return@launch
+                }
+            openTab(
+                TabState(
+                    id = id,
+                    project = data.project,
+                    selection = emptySet(),
+                    viewport = data.viewport,
+                    undo = emptyList(),
+                    redo = emptyList(),
+                    clipboard = emptyList(),
+                    clipboardBaseTick = 0,
+                )
+            )
+            _trackPickerVisible.value = data.project.tracks.size > 1
+            postMessage("「${data.project.title}」を開きました")
+        }
+    }
+
+    fun renameStoredProject(id: String, title: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { ProjectRepository.rename(app, id, title) }
+            result.fold(
+                onSuccess = {
+                    val clean = title.trim().take(80).ifBlank { "無題" }
+                    if (_tabs.value.getOrNull(_activeTabIndex.value)?.id == id) {
+                        _project.value = _project.value?.copy(title = clean)
+                    }
+                    refreshProjects()
+                    postMessage("名前を変更しました")
+                },
+                onFailure = { postMessage("名前を変更できませんでした") },
+            )
+        }
+    }
+
+    fun deleteStoredProject(id: String) {
+        val openIndex = _tabs.value.indexOfFirst { it.id == id }
+        if (openIndex >= 0) closeTab(openIndex)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { ProjectRepository.delete(app, id) }
+            refreshProjects()
+            postMessage("プロジェクトを削除しました")
+        }
     }
 
     fun suggestedFileName(): String {
@@ -891,23 +1180,25 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
             result.fold(
                 onSuccess = { parsed ->
-                    playback.stop()
-                    undoStack.clear()
-                    redoStack.clear()
-                    updateHistoryCounts()
-                    _selection.value = emptySet()
-                    _hover.value = null
                     val project = parsed.project
-                    _project.value = project
                     val notes = project.track.notes
                     val lowest = if (notes.isEmpty()) 36f else {
                         (notes.minOf { it.pitch } - 4).toFloat().coerceIn(0f, 108f)
                     }
-                    _viewport.value = ViewportState(startTick = 0.0, lowestPitch = lowest)
-                    _viewportEpoch.value++
-                    playback.setProject(project)
+                    openTab(
+                        TabState(
+                            id = ProjectRepository.newId(),
+                            project = project,
+                            selection = emptySet(),
+                            viewport = ViewportState(startTick = 0.0, lowestPitch = lowest),
+                            undo = emptyList(),
+                            redo = emptyList(),
+                            clipboard = emptyList(),
+                            clipboardBaseTick = 0,
+                        )
+                    )
                     _trackPickerVisible.value = project.tracks.size > 1
-                    autosaveEnabled = true
+                    saveNow()
                     val warn = parsed.warnings.take(3).joinToString(" / ")
                     postMessage(
                         if (warn.isBlank()) "MIDIを読み込みました (${project.tracks.size}トラック)"
@@ -988,6 +1279,246 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ---------------------------------------------------------------------
+    // MIDI meta
+    // ---------------------------------------------------------------------
+
+    fun setMidiMeta(meta: MidiMeta) {
+        val p = _project.value ?: return
+        if (p.meta == meta) return
+        pushUndo()
+        _project.value = p.copy(meta = meta)
+    }
+
+    // ---------------------------------------------------------------------
+    // External MIDI keyboard (USB / BLE)
+    // ---------------------------------------------------------------------
+
+    fun selectMidiDevice(id: Int?) = midiInput.connect(id)
+
+    fun refreshMidiDevices() = midiInput.refreshDevices()
+
+    fun toggleMidiRecording() {
+        val on = !_midiRecording.value
+        if (on) {
+            midiRecordUndoPushed = false
+            midiPendingNotes.clear()
+        } else {
+            flushPendingMidiNotes()
+            audio.setSustain(false)
+        }
+        _midiRecording.value = on
+        postMessage(if (on) "MIDI入力を録音します" else "MIDI入力の録音を停止しました")
+    }
+
+    private fun handleMidiInput(event: MidiInputEvent) {
+        when (event) {
+            is MidiInputEvent.NoteOn -> onHardwareNoteOn(event.pitch, event.velocity)
+            is MidiInputEvent.NoteOff -> onHardwareNoteOff(event.pitch)
+            is MidiInputEvent.Sustain -> audio.setSustain(event.on)
+            is MidiInputEvent.ControlChange -> Unit
+            is MidiInputEvent.PitchBend -> Unit
+        }
+    }
+
+    private fun trackChannel(): Int = _project.value?.track?.channel ?: 0
+
+    /**
+     * Live-auditions the incoming note and, while recording, remembers where it
+     * started so the matching note-off can be turned into an edit.
+     */
+    private fun onHardwareNoteOn(pitch: Int, velocity: Int) {
+        if (audio.isReady()) audio.noteOn(pitch, velocity.coerceIn(1, 127), trackChannel())
+        if (!_midiRecording.value) return
+        if (midiPendingNotes.size < 128) {
+            midiPendingNotes[pitch] = MidiNoteStart(
+                startTick = playheadTick().toInt().coerceAtLeast(0),
+                velocity = velocity,
+            )
+        }
+    }
+
+    private fun onHardwareNoteOff(pitch: Int) {
+        if (audio.isReady()) audio.noteOff(pitch, trackChannel())
+        if (!_midiRecording.value) return
+        val pending = midiPendingNotes.remove(pitch) ?: return
+        commitRecordedNote(pitch, pending)
+    }
+
+    private fun commitRecordedNote(pitch: Int, start: MidiNoteStart) {
+        val p = _project.value ?: return
+        val snappedStart = snapIfNeeded(start.startTick).coerceAtLeast(0)
+        val rawDuration = playheadTick().toInt() - snappedStart
+        val duration = if (rawDuration >= 8) rawDuration else _prefs.value.inputDuration.ticks(p.ppq)
+        val id = p.nextNoteId
+        val note = Note(
+            id = id,
+            pitch = pitch.coerceIn(0, 127),
+            startTick = snappedStart,
+            durationTicks = duration.coerceAtLeast(1),
+            velocity = start.velocity.coerceIn(1, 127),
+            channel = p.track.channel,
+        )
+        if (!midiRecordUndoPushed) {
+            pushUndo()
+            midiRecordUndoPushed = true
+        }
+        applyNotes(p.notes + note, p.copy(nextNoteId = id + 1))
+        _selection.value = setOf(id)
+    }
+
+    /** Closes notes that never received a note-off, e.g. when disarming. */
+    private fun flushPendingMidiNotes() {
+        val pending = midiPendingNotes.toList()
+        midiPendingNotes.clear()
+        pending.forEach { (pitch, start) -> commitRecordedNote(pitch, start) }
+    }
+
+    // ---------------------------------------------------------------------
+    // Share
+    // ---------------------------------------------------------------------
+
+    fun shareMidi() {
+        val p = _project.value ?: return
+        if (_busy.value.exporting) return
+        _busy.value = _busy.value.copy(exporting = true)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = MidiFile.write(p)
+                    val dir = File(app.cacheDir, "shared").apply { mkdirs() }
+                    dir.listFiles()?.forEach { it.delete() }
+                    val name = suggestedFileName()
+                    val file = File(dir, name)
+                    file.writeBytes(bytes)
+                    val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
+                    uri to name
+                }
+            }
+            result.fold(
+                onSuccess = { (uri, name) ->
+                    _uiCommands.tryEmit(UiCommand.Share(uri, "audio/midi", name))
+                },
+                onFailure = { t -> postMessage("共有に失敗しました: ${t.message ?: t.javaClass.simpleName}") },
+            )
+            _busy.value = _busy.value.copy(exporting = false)
+        }
+    }
+
+    fun requestImport() {
+        _uiCommands.tryEmit(UiCommand.ImportMidi)
+    }
+
+    fun requestExport() {
+        _uiCommands.tryEmit(UiCommand.ExportMidi)
+    }
+
+    // ---------------------------------------------------------------------
+    // Project browser visibility
+    // ---------------------------------------------------------------------
+
+    fun openProjectBrowser() {
+        refreshProjects()
+        _projectBrowserVisible.value = true
+    }
+
+    fun dismissProjectBrowser() {
+        _projectBrowserVisible.value = false
+    }
+
+    // ---------------------------------------------------------------------
+    // External keyboard shortcuts
+    // ---------------------------------------------------------------------
+
+    /**
+     * Handles a physical keyboard event. Returns true when the shortcut was
+     * consumed. Plain typing is never intercepted because a focused text field
+     * consumes its keys before the Activity sees them.
+     */
+    fun onShortcut(keyCode: Int, event: KeyEvent): Boolean {
+        val ctrl = event.isCtrlPressed || event.isMetaPressed
+        val shift = event.isShiftPressed
+        if (ctrl) {
+            return when (keyCode) {
+                KeyEvent.KEYCODE_Z -> { if (shift) redo() else undo(); true }
+                KeyEvent.KEYCODE_Y -> { redo(); true }
+                KeyEvent.KEYCODE_C -> { copySelection(); true }
+                KeyEvent.KEYCODE_X -> { cutSelection(); true }
+                KeyEvent.KEYCODE_V -> { pasteAtPlayhead(); true }
+                KeyEvent.KEYCODE_A -> { selectAll(); true }
+                KeyEvent.KEYCODE_D -> { duplicateSelection(); true }
+                KeyEvent.KEYCODE_S -> { if (shift) shareMidi() else saveNow(); true }
+                KeyEvent.KEYCODE_N -> { newProject(); true }
+                KeyEvent.KEYCODE_O -> { requestImport(); true }
+                KeyEvent.KEYCODE_E -> { requestExport(); true }
+                KeyEvent.KEYCODE_P -> { openProjectBrowser(); true }
+                KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_PLUS -> {
+                    _viewCommands.tryEmit(ViewCommand.ZoomIn); true
+                }
+                KeyEvent.KEYCODE_MINUS -> { _viewCommands.tryEmit(ViewCommand.ZoomOut); true }
+                KeyEvent.KEYCODE_0 -> { _viewCommands.tryEmit(ViewCommand.Fit); true }
+                KeyEvent.KEYCODE_TAB -> { cycleTab(if (shift) -1 else 1); true }
+                KeyEvent.KEYCODE_PAGE_DOWN -> { cycleTab(1); true }
+                KeyEvent.KEYCODE_PAGE_UP -> { cycleTab(-1); true }
+                else -> false
+            }
+        }
+        return when (keyCode) {
+            KeyEvent.KEYCODE_SPACE -> {
+                if (event.repeatCount == 0) togglePlayback()
+                true
+            }
+            KeyEvent.KEYCODE_R -> { toggleMidiRecording(); true }
+            KeyEvent.KEYCODE_L -> { toggleLoop(); true }
+            KeyEvent.KEYCODE_ESCAPE -> { escapeAction(); true }
+            KeyEvent.KEYCODE_HOME -> { seekTo(0.0); true }
+            KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL ->
+                _selection.value.isNotEmpty().also { if (it) deleteSelection() }
+            KeyEvent.KEYCODE_DPAD_LEFT -> nudgeSelection(-1, 0)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> nudgeSelection(1, 0)
+            KeyEvent.KEYCODE_DPAD_UP -> nudgeSelection(0, if (shift) 12 else 1)
+            KeyEvent.KEYCODE_DPAD_DOWN -> nudgeSelection(0, if (shift) -12 else -1)
+            else -> false
+        }
+    }
+
+    fun cycleTab(delta: Int) {
+        val size = _tabs.value.size
+        if (size <= 1) return
+        val next = ((_activeTabIndex.value + delta) % size + size) % size
+        switchTab(next)
+    }
+
+    private fun escapeAction() {
+        if (playback.isPlaying.value) {
+            stopPlayback()
+        } else if (_trackPickerVisible.value) {
+            _trackPickerVisible.value = false
+        } else if (_inspectorNoteId.value != null) {
+            _inspectorNoteId.value = null
+        } else if (_selection.value.isNotEmpty()) {
+            clearSelection()
+        }
+    }
+
+    private fun nudgeSelection(barDirection: Int, semitones: Int): Boolean {
+        val p = _project.value ?: return false
+        val ids = _selection.value
+        if (ids.isEmpty()) return false
+        if (semitones != 0) {
+            transposeSelection(semitones)
+            return true
+        }
+        val step = duplicateStepTicks(p)
+        val moved = p.notes.map { n ->
+            if (n.id in ids) n.shifted(barDirection * step, 0).clampInsideSong() else n
+        }
+        if (moved == p.notes) return true
+        pushUndo()
+        applyNotes(moved, p)
+        return true
+    }
+
+    // ---------------------------------------------------------------------
     // Persistence / lifecycle
     // ---------------------------------------------------------------------
 
@@ -998,24 +1529,59 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onBackground() {
         playback.pause()
+        midiInput.sendAllNotesOff()
         audio.allNotesOff()
         saveNow()
     }
 
-    private fun restore(data: AutosaveData) {
-        _prefs.value = data.prefs
-        _viewport.value = data.viewport
-        _viewportEpoch.value++
-        _project.value = data.project
-        _selection.value = emptySet()
-        playback.setProject(data.project)
-        _autosave.value = AutosaveState.Saved(
-            if (data.savedAtMillis > 0) data.savedAtMillis else System.currentTimeMillis()
+    /**
+     * Reopens the workspace that was open last time. On first launch (or after
+     * an upgrade) the legacy single-session autosave is migrated into a project.
+     */
+    private suspend fun restoreWorkspace() {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val migrated = ProjectRepository.migrateLegacy(app)
+                val workspace = ProjectRepository.loadWorkspace(app)
+                var ids = workspace.openIds.filter { ProjectRepository.exists(app, it) }
+                if (ids.isEmpty() && migrated != null) ids = listOf(migrated)
+                val tabs = ids.mapNotNull { id ->
+                    ProjectRepository.load(app, id).getOrNull()?.let { data ->
+                        TabState(
+                            id = id,
+                            project = data.project,
+                            selection = emptySet(),
+                            viewport = data.viewport,
+                            undo = emptyList(),
+                            redo = emptyList(),
+                            clipboard = emptyList(),
+                            clipboardBaseTick = 0,
+                        )
+                    }
+                }
+                Triple(tabs, workspace.prefs, workspace.activeIndex)
+            }
+        }
+        result.fold(
+            onSuccess = { (tabs, prefs, active) ->
+                _prefs.value = prefs
+                _tabs.value = tabs
+                _boot.value = BootState.Ready(tabs.isNotEmpty())
+                autosaveEnabled = true
+                if (tabs.isNotEmpty()) {
+                    activateTab(active.coerceIn(0, tabs.size - 1))
+                    _autosave.value = AutosaveState.Saved(System.currentTimeMillis())
+                    postMessage("前回のプロジェクトを復元しました")
+                }
+                runPendingImport()
+            },
+            onFailure = { t ->
+                _boot.value = BootState.Ready(false)
+                autosaveEnabled = true
+                postMessage("ワークスペースを復元できませんでした: ${t.message ?: t.javaClass.simpleName}")
+                runPendingImport()
+            },
         )
-        _boot.value = BootState.Ready(true)
-        autosaveEnabled = true
-        postMessage("前回の続きを復元しました")
-        runPendingImport()
     }
 
     private fun runPendingImport() {
@@ -1032,9 +1598,25 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Fire-and-forget save of a specific (possibly inactive) tab. */
+    private fun persistTab(tab: TabState) {
+        viewModelScope.launch { persistTabNow(tab) }
+    }
+
+    private suspend fun persistTabNow(tab: TabState) {
+        val snapshot = AutosaveData(
+            project = tab.project,
+            viewport = tab.viewport,
+            prefs = _prefs.value,
+            savedAtMillis = System.currentTimeMillis(),
+        )
+        withContext(Dispatchers.IO) { ProjectRepository.save(app, tab.id, snapshot) }
+    }
+
     private suspend fun saveInternal() {
         if (!autosaveEnabled) return
         val project = _project.value ?: return
+        val id = _tabs.value.getOrNull(_activeTabIndex.value)?.id ?: return
         val snapshot = AutosaveData(
             project = project,
             viewport = _viewport.value,
@@ -1042,16 +1624,27 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             savedAtMillis = System.currentTimeMillis(),
         )
         _autosave.value = AutosaveState.Saving
-        val result = withContext(Dispatchers.IO) { ProjectStore.save(app, snapshot) }
+        val result = withContext(Dispatchers.IO) { ProjectRepository.save(app, id, snapshot) }
         _autosave.value = result.fold(
             onSuccess = { AutosaveState.Saved(snapshot.savedAtMillis) },
             onFailure = { AutosaveState.Failed(it.message ?: "自動保存に失敗") }
         )
+        persistWorkspace()
+    }
+
+    private fun persistWorkspace() {
+        val state = WorkspaceState(
+            openIds = _tabs.value.map { it.id },
+            activeIndex = _activeTabIndex.value,
+            prefs = _prefs.value,
+        )
+        viewModelScope.launch { withContext(Dispatchers.IO) { ProjectRepository.saveWorkspace(app, state) } }
     }
 
     override fun onCleared() {
         autosaveJob?.cancel()
         previewJobs.values.forEach { it.cancel() }
+        midiInput.shutdown()
         playback.shutdown()
         audio.shutdown()
         super.onCleared()
@@ -1091,6 +1684,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         bpm = p.bpm,
         timeSignature = p.timeSignature,
         timeSignatures = p.timeSignatures,
+        meta = p.meta,
     )
 
     private fun restoreSnapshot(snapshot: EditSnapshot) {
@@ -1099,6 +1693,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             bpm = snapshot.bpm,
             timeSignature = snapshot.timeSignature,
             timeSignatures = snapshot.timeSignatures,
+            meta = snapshot.meta,
         ).withActiveNotes(snapshot.notes)
         _project.value = updated
         val ids = snapshot.notes.mapTo(HashSet()) { it.id }

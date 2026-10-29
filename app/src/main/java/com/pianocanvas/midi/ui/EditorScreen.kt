@@ -1,5 +1,6 @@
 package com.pianocanvas.midi.ui
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -7,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,9 +65,13 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Piano
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
@@ -120,7 +127,11 @@ import com.pianocanvas.midi.editor.EditorUiState
 import com.pianocanvas.midi.editor.EditorViewModel
 import com.pianocanvas.midi.editor.HoverInfo
 import com.pianocanvas.midi.editor.HoverZone
+import com.pianocanvas.midi.editor.MidiUiState
 import com.pianocanvas.midi.editor.RollHost
+import com.pianocanvas.midi.editor.TabInfo
+import com.pianocanvas.midi.editor.UiCommand
+import com.pianocanvas.midi.editor.ViewCommand
 import com.pianocanvas.midi.model.GridUnit
 import com.pianocanvas.midi.model.MeterMap
 import com.pianocanvas.midi.model.Project
@@ -177,6 +188,29 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
             soundFontLauncher.launch(arrayOf("*/*"))
         }
 
+        val context = LocalContext.current
+        val projectBrowserVisible by vm.projectBrowserVisible.collectAsStateWithLifecycle()
+        LaunchedEffect(vm) {
+            vm.uiCommands.collect { command ->
+                when (command) {
+                    UiCommand.ImportMidi -> onImport()
+                    UiCommand.ExportMidi -> onExport()
+                    is UiCommand.Share -> {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = command.mimeType
+                            putExtra(Intent.EXTRA_STREAM, command.uri)
+                            putExtra(Intent.EXTRA_SUBJECT, command.title)
+                            putExtra(Intent.EXTRA_TITLE, command.title)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        runCatching {
+                            context.startActivity(Intent.createChooser(send, "MIDIを共有"))
+                        }
+                    }
+                }
+            }
+        }
+
         Box(
             Modifier
                 .fillMaxSize()
@@ -194,6 +228,7 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
                     onImport = onImport,
                     onExport = onExport,
                     onLoadSoundFont = onLoadSoundFont,
+                    onShare = vm::shareMidi,
                 )
             } else if (state.boot is BootState.Loading) {
                 BootScreen()
@@ -201,6 +236,30 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
                 WelcomeScreen(
                     onNewProject = vm::newProject,
                     onImport = onImport,
+                    onOpenProjects = vm::openProjectBrowser,
+                )
+            }
+
+            if (projectBrowserVisible) {
+                ProjectBrowserDialog(
+                    projects = state.projects,
+                    loading = state.projectsLoading,
+                    activeId = state.tabs.firstOrNull { it.active }?.id,
+                    onDismiss = vm::dismissProjectBrowser,
+                    onOpen = {
+                        vm.openProject(it)
+                        vm.dismissProjectBrowser()
+                    },
+                    onNew = {
+                        vm.newProject()
+                        vm.dismissProjectBrowser()
+                    },
+                    onImport = {
+                        vm.dismissProjectBrowser()
+                        onImport()
+                    },
+                    onRename = vm::renameStoredProject,
+                    onDelete = vm::deleteStoredProject,
                 )
             }
 
@@ -239,7 +298,11 @@ private fun BootScreen() {
 }
 
 @Composable
-private fun WelcomeScreen(onNewProject: () -> Unit, onImport: () -> Unit) {
+private fun WelcomeScreen(
+    onNewProject: () -> Unit,
+    onImport: () -> Unit,
+    onOpenProjects: () -> Unit,
+) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier
@@ -279,6 +342,13 @@ private fun WelcomeScreen(onNewProject: () -> Unit, onImport: () -> Unit) {
                 icon = Icons.Rounded.FolderOpen,
                 filled = false,
                 onClick = onImport,
+            )
+            Spacer(Modifier.height(12.dp))
+            ButtonWide(
+                label = "保存済みプロジェクトを開く",
+                icon = Icons.Rounded.LibraryMusic,
+                filled = false,
+                onClick = onOpenProjects,
             )
             Spacer(Modifier.height(28.dp))
             FeatureLine("ペン先でなぞって長さを指定、指でスクロール")
@@ -359,6 +429,7 @@ private fun EditorScreen(
     onImport: () -> Unit,
     onExport: () -> Unit,
     onLoadSoundFont: () -> Unit,
+    onShare: () -> Unit,
 ) {
     val context = LocalContext.current
     val rollView = remember { PianoRollView(context) }
@@ -405,6 +476,26 @@ private fun EditorScreen(
         if (hover == null) rollView.dismissHover()
     }
 
+    // Keyboard shortcuts that need the roll view (zoom, fit, bar scrolling).
+    LaunchedEffect(rollView, vm) {
+        vm.viewCommands.collect { command ->
+            when (command) {
+                ViewCommand.ZoomIn -> {
+                    rollView.zoomHorizontal(1.22f)
+                    rollView.zoomVertical(1.12f)
+                }
+                ViewCommand.ZoomOut -> {
+                    rollView.zoomHorizontal(0.82f)
+                    rollView.zoomVertical(0.9f)
+                }
+                ViewCommand.Fit -> rollView.fitToSong()
+                is ViewCommand.ScrollBars -> rollView.scrollByBars(command.delta)
+            }
+        }
+    }
+
+    var showMeta by remember { mutableStateOf(false) }
+    var showMidiInput by remember { mutableStateOf(false) }
     var showBpm by remember { mutableStateOf(false) }
     var showMeter by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -432,6 +523,10 @@ private fun EditorScreen(
                 onHelp = { showHelp = true },
                 onRename = { showRename = true },
                 onLoadSoundFont = onLoadSoundFont,
+                onProjects = vm::openProjectBrowser,
+                onShare = onShare,
+                onMeta = { showMeta = true },
+                onMidiInput = { vm.refreshMidiDevices(); showMidiInput = true },
             )
             BoxWithConstraints(
                 Modifier
@@ -623,6 +718,28 @@ private fun EditorScreen(
             LaunchedEffect(inspectorId) { vm.dismissNoteInspector() }
         }
     }
+
+    if (showMeta) {
+        MidiMetaDialog(
+            initial = project.meta,
+            onDismiss = { showMeta = false },
+            onApply = {
+                vm.setMidiMeta(it)
+                showMeta = false
+            },
+        )
+    }
+
+    if (showMidiInput) {
+        MidiInputDialog(
+            midi = ui.midi,
+            onDismiss = { showMidiInput = false },
+            onSelectDevice = vm::selectMidiDevice,
+            onToggleRecording = vm::toggleMidiRecording,
+            onRefresh = vm::refreshMidiDevices,
+        )
+    }
+
 }
 
 // ----------------------------------------------------------------------
@@ -644,6 +761,10 @@ private fun TopBar(
     onHelp: () -> Unit,
     onRename: () -> Unit,
     onLoadSoundFont: () -> Unit,
+    onProjects: () -> Unit,
+    onShare: () -> Unit,
+    onMeta: () -> Unit,
+    onMidiInput: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -665,6 +786,10 @@ private fun TopBar(
                     onSettings = onSettings,
                     onHelp = onHelp,
                     onLoadSoundFont = onLoadSoundFont,
+                    onProjects = onProjects,
+                    onShare = onShare,
+                    onMeta = onMeta,
+                    onMidiInput = onMidiInput,
                 )
             } else {
                 WideTopRow(
@@ -680,7 +805,14 @@ private fun TopBar(
                     onSettings = onSettings,
                     onHelp = onHelp,
                     onLoadSoundFont = onLoadSoundFont,
+                    onProjects = onProjects,
+                    onShare = onShare,
+                    onMeta = onMeta,
+                    onMidiInput = onMidiInput,
                 )
+            }
+            if (ui.tabs.size > 1) {
+                TabStrip(tabs = ui.tabs, vm = vm)
             }
             // A bright accent line separates the bar from the dark piano roll.
             Box(
@@ -713,6 +845,10 @@ private fun WideTopRow(
     onSettings: () -> Unit,
     onHelp: () -> Unit,
     onLoadSoundFont: () -> Unit,
+    onProjects: () -> Unit,
+    onShare: () -> Unit,
+    onMeta: () -> Unit,
+    onMidiInput: () -> Unit,
 ) {
     Row(
         Modifier
@@ -745,6 +881,8 @@ private fun WideTopRow(
             )
         }
         Spacer(Modifier.width(6.dp))
+        MidiChip(midi = ui.midi, onClick = onMidiInput)
+        Spacer(Modifier.width(6.dp))
         HistoryButtons(ui = ui, vm = vm)
         Spacer(Modifier.width(4.dp))
         OverflowMenu(
@@ -754,6 +892,10 @@ private fun WideTopRow(
             onSoundFont = onLoadSoundFont,
             onSettings = onSettings,
             onHelp = onHelp,
+            onProjects = onProjects,
+            onShare = onShare,
+            onMeta = onMeta,
+            onMidiInput = onMidiInput,
         )
     }
 }
@@ -772,6 +914,10 @@ private fun CompactTopRows(
     onSettings: () -> Unit,
     onHelp: () -> Unit,
     onLoadSoundFont: () -> Unit,
+    onProjects: () -> Unit,
+    onShare: () -> Unit,
+    onMeta: () -> Unit,
+    onMidiInput: () -> Unit,
 ) {
     Column {
         Row(
@@ -790,6 +936,8 @@ private fun CompactTopRows(
                 )
                 Spacer(Modifier.width(4.dp))
             }
+            MidiChip(midi = ui.midi, onClick = onMidiInput, compact = true)
+            Spacer(Modifier.width(4.dp))
             OverflowMenu(
                 onNew = onNew,
                 onImport = onImport,
@@ -797,6 +945,10 @@ private fun CompactTopRows(
                 onSoundFont = onLoadSoundFont,
                 onSettings = onSettings,
                 onHelp = onHelp,
+                onProjects = onProjects,
+                onShare = onShare,
+                onMeta = onMeta,
+                onMidiInput = onMidiInput,
             )
         }
         Row(
@@ -1040,6 +1192,119 @@ private fun MetaChip(
 }
 
 @Composable
+private fun MidiChip(
+    midi: MidiUiState,
+    onClick: () -> Unit,
+    compact: Boolean = false,
+) {
+    val recording = midi.recording
+    val label = when {
+        recording -> "REC"
+        midi.connectedName != null -> midi.connectedName
+        midi.devices.any { it.canReceive } -> "MIDI入力"
+        else -> "MIDI"
+    }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(11.dp),
+        color = if (recording) MaterialTheme.colorScheme.error.copy(alpha = 0.22f)
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (recording) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.outline,
+        ),
+        modifier = Modifier.heightIn(min = 38.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (recording) Icons.Rounded.FiberManualRecord else Icons.Rounded.Usb,
+                contentDescription = null,
+                tint = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(if (recording) 13.dp else 15.dp),
+            )
+            if (!compact || recording) {
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (recording) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 132.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabStrip(tabs: List<TabInfo>, vm: EditorViewModel) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        tabs.forEachIndexed { index, tab ->
+            TabChip(
+                tab = tab,
+                onSelect = { vm.switchTab(index) },
+                onClose = { vm.closeTab(index) },
+            )
+        }
+        IconButton(onClick = vm::newProject, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Rounded.Add, contentDescription = "新しいタブ", tint = Paper)
+        }
+    }
+}
+
+@Composable
+private fun TabChip(tab: TabInfo, onSelect: () -> Unit, onClose: () -> Unit) {
+    val accent = if (tab.active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    Surface(
+        onClick = onSelect,
+        shape = RoundedCornerShape(10.dp),
+        color = if (tab.active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (tab.active) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, accent),
+    ) {
+        Row(
+            Modifier.padding(start = 12.dp, end = 2.dp, top = 3.dp, bottom = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                tab.title,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (tab.active) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 150.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            IconButton(onClick = onClose, modifier = Modifier.size(26.dp)) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = "タブを閉じる",
+                    tint = Mist,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun OverflowMenu(
     onNew: () -> Unit,
     onImport: () -> Unit,
@@ -1047,6 +1312,10 @@ private fun OverflowMenu(
     onSoundFont: () -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
+    onProjects: () -> Unit,
+    onShare: () -> Unit,
+    onMeta: () -> Unit,
+    onMidiInput: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -1054,6 +1323,39 @@ private fun OverflowMenu(
             Icon(Icons.Rounded.MoreVert, contentDescription = "メニュー", tint = Paper)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("プロジェクトを開く") },
+                leadingIcon = { Icon(Icons.Rounded.LibraryMusic, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onProjects()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("共有") },
+                leadingIcon = { Icon(Icons.Rounded.Share, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onShare()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("MIDI META 設定") },
+                leadingIcon = { Icon(Icons.Rounded.GraphicEq, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onMeta()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("MIDIキーボード入力") },
+                leadingIcon = { Icon(Icons.Rounded.Usb, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onMidiInput()
+                },
+            )
+            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("MIDIを読み込む") },
                 leadingIcon = { Icon(Icons.Rounded.FileUpload, contentDescription = null) },

@@ -3,6 +3,7 @@ package com.pianocanvas.midi
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -55,6 +56,15 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.data?.let { vm.importMidi(it) }
+    }
+
+    /**
+     * External keyboard shortcuts. A focused text field consumes its keys before
+     * they reach here, so typing into a dialog is never intercepted.
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (vm.onShortcut(keyCode, event)) return true
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onStop() {

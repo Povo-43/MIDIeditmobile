@@ -157,6 +157,34 @@ class TempoMap(
 
 data class TimeSignaturePoint(val tick: Int, val signature: TimeSignature)
 
+/**
+ * Song-level MIDI meta events exposed by the META editor.
+ *
+ * Only events with a fixed, unambiguous SMF representation are managed here so
+ * that writing then re-reading a file is stable: the editor strips exactly the
+ * events it owns at tick 0 of the first track and re-emits them from these
+ * fields. Other meta events (markers, cue points, unknown types) are preserved
+ * as raw events.
+ */
+data class MidiMeta(
+    /** Copyright notice (FF 02). */
+    val copyright: String = "",
+    /** First text event (FF 01); conventionally the composer. */
+    val composer: String = "",
+    /** Second text event (FF 01); conventionally the lyricist. */
+    val lyricist: String = "",
+    /** Third text event (FF 01); a free comment. */
+    val comment: String = "",
+    /** Key signature (FF 59), -7..7 sharps/flats, or null when unset. */
+    val keySignature: Int? = null,
+    /** True for a minor key signature. */
+    val minor: Boolean = false,
+) {
+    val isEmpty: Boolean
+        get() = copyright.isBlank() && composer.isBlank() && lyricist.isBlank() &&
+            comment.isBlank() && keySignature == null
+}
+
 /** Time-signature-aware conversion between ticks and bars/beats. */
 class MeterMap(
     private val ppq: Int,
@@ -269,6 +297,7 @@ data class Project(
     val loopEnabled: Boolean = false,
     val nextNoteId: Long = 1L,
     val importedPathName: String? = null,
+    val meta: MidiMeta = MidiMeta(),
 ) {
     val track: Track get() = tracks[activeTrack.coerceIn(0, tracks.size - 1)]
     val notes: List<Note> get() = track.notes

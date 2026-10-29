@@ -1,5 +1,6 @@
 package com.pianocanvas.midi.midi
 
+import com.pianocanvas.midi.model.MidiMeta
 import com.pianocanvas.midi.model.Note
 import com.pianocanvas.midi.model.Project
 import com.pianocanvas.midi.model.RawEvent
@@ -123,6 +124,7 @@ object MidiFile {
 
         val active = trackModels.indexOfFirst { it.notes.isNotEmpty() }
             .let { if (it >= 0) it else 0 }
+        val meta = readProjectMeta(trackModels)
         val songEnd = trackModels.flatMap { it.notes }.maxOfOrNull { it.endTick } ?: 0
         val meterSpan = max(songEnd, ppq * 4 * firstSig.numerator)
         val loopEnd = ((meterSpan + ppq * 4 - 1) / (ppq * 4)) * ppq * 4
@@ -140,6 +142,7 @@ object MidiFile {
             loopEnabled = false,
             nextNoteId = noteId,
             importedPathName = title.takeIf { it.isNotBlank() },
+            meta = meta,
         )
         if (trackModels.all { it.notes.isEmpty() }) {
             warnings += "ノートが見つかりませんでした"
@@ -299,6 +302,37 @@ object MidiFile {
         return events.firstOrNull { !it.isMeta && !it.isSysex }?.channel?.coerceAtLeast(0) ?: 0
     }
 
+    /**
+     * Rebuilds the META fields the editor owns. Only track 0's tick-0 events are
+     * considered, matching what [write] emits, so a write/read cycle is stable.
+     */
+    private fun readProjectMeta(tracks: List<Track>): MidiMeta {
+        val first = tracks.firstOrNull() ?: return MidiMeta()
+        val tickZero = first.rawEvents.filter { it.tick == 0 && it.isMeta }
+        fun firstText(type: Int): String? = tickZero
+            .filter { it.metaType == type && it.data.size > 1 }
+            .mapNotNull { decodeText(it.data.copyOfRange(1, it.data.size))?.trim() }
+            .firstOrNull { it.isNotBlank() }
+        val texts = tickZero
+            .filter { it.metaType == 0x01 && it.data.size > 1 }
+            .mapNotNull { decodeText(it.data.copyOfRange(1, it.data.size))?.trim() }
+            .filter { it.isNotBlank() }
+        val key = first.rawEvents.firstOrNull {
+            it.isMeta && it.metaType == 0x59 && it.data.size >= 3
+        }
+        return MidiMeta(
+            copyright = firstText(0x02) ?: "",
+            composer = texts.getOrNull(0) ?: "",
+            lyricist = texts.getOrNull(1) ?: "",
+            comment = texts.getOrNull(2) ?: "",
+            keySignature = key?.let {
+                val sf = it.data[1]
+                (if (sf > 127) sf - 256 else sf).coerceIn(-7, 7)
+            },
+            minor = key?.let { it.data[2] != 0 } ?: false,
+        )
+    }
+
     private fun trackName(events: List<RawEvent>): String? {
         val ev = events.firstOrNull { it.isMeta && it.metaType == 0x03 && it.data.size > 1 }
             ?: return null
@@ -340,12 +374,18 @@ object MidiFile {
             // stale tick-0 values from every track so a format-1 file cannot
             // carry two conflicting tempos; only track 0 receives the new one.
             val addTempoAndMeter = index == 0
+            // The META editor owns copyright / key signature / text at tick 0 of
+            // track 0. Strip the stored copies so re-saving cannot duplicate them.
+            val addMeta = index == 0
 
             for (raw in track.rawEvents) {
                 if (raw.isEndOfTrack) continue
                 if (raw.isNoteOn || raw.isNoteOff) continue // regenerated below
                 if (raw.isMeta && raw.metaType == 0x51 && raw.tick == 0) continue
                 if (raw.isMeta && raw.metaType == 0x58 && raw.tick == 0) continue
+                if (addMeta && raw.tick == 0 && raw.isMeta &&
+                    (raw.metaType == 0x01 || raw.metaType == 0x02 || raw.metaType == 0x59)
+                ) continue
                 events += OutputEvent(raw.tick, priorityFor(raw), seq++, raw)
             }
 
@@ -369,6 +409,21 @@ object MidiFile {
                 }
                 val payload = intArrayOf(0x58, sig.numerator, denom, 24, 8)
                 events += OutputEvent(0, 0, seq++, RawEvent(0, 0xFF, payload))
+            }
+            if (addMeta) {
+                val meta = project.meta
+                if (meta.copyright.isNotBlank()) {
+                    events += OutputEvent(0, 0, seq++, textMeta(0x02, meta.copyright))
+                }
+                meta.keySignature?.let { sf ->
+                    val payload = intArrayOf(0x59, sf.coerceIn(-7, 7) and 0xFF, if (meta.minor) 1 else 0)
+                    events += OutputEvent(0, 0, seq++, RawEvent(0, 0xFF, payload))
+                }
+                listOf(meta.composer, meta.lyricist, meta.comment).forEach { text ->
+                    if (text.isNotBlank()) {
+                        events += OutputEvent(0, 0, seq++, textMeta(0x01, text))
+                    }
+                }
             }
 
             for (note in track.notes) {
@@ -418,6 +473,15 @@ object MidiFile {
             out.write(it)
         }
         return out.toByteArray()
+    }
+
+    /** UTF-8 encoded text meta event: [type, payload...]. */
+    private fun textMeta(type: Int, text: String): RawEvent {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        val data = IntArray(bytes.size + 1)
+        data[0] = type
+        bytes.forEachIndexed { i, b -> data[i + 1] = b.toInt() and 0xFF }
+        return RawEvent(0, 0xFF, data)
     }
 
     private data class OutputEvent(val tick: Int, val priority: Int, val seq: Int, val raw: RawEvent)

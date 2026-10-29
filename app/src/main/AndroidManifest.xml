@@ -9,6 +9,10 @@
     <uses-feature
         android:name="android.hardware.touchscreen.multitouch"
         android:required="false" />
+    <!-- USB / Bluetooth LE MIDI keyboards are optional. -->
+    <uses-feature
+        android:name="android.software.midi"
+        android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -37,5 +41,16 @@
                 <data android:mimeType="application/x-midi" />
             </intent-filter>
         </activity>
+
+        <!-- Shares exported .mid files from the cache directory. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
