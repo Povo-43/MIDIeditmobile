@@ -99,6 +99,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -449,7 +450,16 @@ private fun EditorScreen(
                             playing = ui.isPlaying,
                         )
                     },
-                    modifier = Modifier.fillMaxSize(),
+                    // AndroidView stopped clipping its child automatically, and
+                    // the roll paints its background with Canvas.drawColor(). On
+                    // an unclipped canvas that fills the whole window and covers
+                    // every composable drawn before it — the title, transport and
+                    // menu — leaving them touchable but invisible. Clip the
+                    // interop view to its layout bounds so its drawing stays
+                    // inside the roll area.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clipToBounds(),
                 )
                 if (hover != null && ui.prefs.hoverToolbar) {
                     HoverToolbar(

@@ -1277,7 +1277,13 @@ class PianoRollView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(colBg)
+        // Fill only this view's own rect. Canvas.drawColor would fill the whole
+        // clip region, and the interop host no longer clips AndroidViews to
+        // their bounds, so drawColor() used to paint over the composables above
+        // the roll (top bar) as well.
+        fillPaint.color = colBg
+        fillPaint.style = Paint.Style.FILL
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fillPaint)
         val p = project
         if (p == null) {
             textPaint.color = colDim
