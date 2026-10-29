@@ -562,7 +562,6 @@ private fun EditorScreen(
                 ui = ui,
                 project = project,
                 vm = vm,
-                wide = !compact,
                 onSettings = { showSettings = true },
                 onVelocity = { showVelocity = true },
                 onLength = { showLength = true },
@@ -1437,7 +1436,6 @@ private fun ContextDock(
     ui: EditorUiState,
     project: Project,
     vm: EditorViewModel,
-    wide: Boolean,
     onSettings: () -> Unit,
     onVelocity: () -> Unit,
     onLength: () -> Unit,
@@ -1449,9 +1447,9 @@ private fun ContextDock(
     onInspector: () -> Unit,
 ) {
     val selectionCount = ui.selection.size
-    // Contextual actions change with the selection: input controls while
-    // nothing is selected, note editing once a note is selected.
-    val contextActions = buildList {
+    // The unselected bar: input controls shown when nothing is selected. It
+    // stays as the bottom row even while notes are selected.
+    val unselectedActions = buildList {
             if (selectionCount == 0) {
                 add(
                     DockAction(
@@ -1513,7 +1511,12 @@ private fun ContextDock(
                         onClick = vm::pasteAtPlayhead,
                     )
                 )
-            } else {
+            }
+    }
+    // Note editing actions: an extra bar layered on top of the unselected bar
+    // while notes are selected.
+    val selectionActions = buildList {
+            if (selectionCount > 0) {
                 add(
                     DockAction(
                         id = "clear",
@@ -1645,10 +1648,9 @@ private fun ContextDock(
                     )
                 }
             }
-        }
-        // The always-available bottom menu: bar navigation, zoom, loop and
-        // settings. On a roomy screen this keeps its own row so the note edit
-        // menu never pushes it out of view.
+    }
+        // The always-available actions that share the bottom (unselected) bar:
+        // bar navigation, zoom, loop and settings.
         val alwaysActions = buildList {
             add(
                 DockAction(
@@ -1708,10 +1710,6 @@ private fun ContextDock(
                 )
             )
         }
-        // Wide screens get a two-tier dock while a note is selected: the note
-        // edit menu on top, the always-available menu bar below it.
-        val twoTier = wide && selectionCount > 0
-
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 12.dp) {
         Column {
             Box(
@@ -1758,8 +1756,10 @@ private fun ContextDock(
                     color = Mist.copy(alpha = 0.7f),
                 )
             }
-            DockActionRow(contextActions)
-            if (twoTier) {
+            // While notes are selected the note edit menu becomes an extra
+            // bar above the unselected bar; otherwise a single row is used.
+            if (selectionCount > 0) {
+                DockActionRow(selectionActions)
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -1767,10 +1767,8 @@ private fun ContextDock(
                         .height(1.dp)
                         .background(MaterialTheme.colorScheme.outlineVariant)
                 )
-                DockActionRow(alwaysActions)
-            } else {
-                DockActionRow(contextActions + alwaysActions)
             }
+            DockActionRow(unselectedActions + alwaysActions)
         }
     }
 }
