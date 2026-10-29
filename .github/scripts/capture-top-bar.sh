@@ -115,6 +115,9 @@ PY
   # diagnosed from the artifacts alone.
   adb shell dumpsys window displays > "${prefix}-displays.txt" || true
   adb shell dumpsys window >> "${prefix}-displays.txt" 2>/dev/null || true
+  # The build carries TEMP-DIAG TopBarDiag logging; keep it in the artifacts.
+  adb logcat -d -s TopBarDiag > "${prefix}-topbardiag.txt" || true
+  adb logcat -d > "${prefix}-logcat-full.txt" 2>/dev/null || true
 }
 
 RELEASE_APK=$(ls release/*.apk | head -1)

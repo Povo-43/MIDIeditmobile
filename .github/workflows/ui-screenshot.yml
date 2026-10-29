@@ -90,6 +90,8 @@ jobs:
             after-*.svg
             before-displays.txt
             after-displays.txt
+            before-topbardiag.txt
+            after-topbardiag.txt
             wm-size.txt
             wm-density.txt
           if-no-files-found: warn

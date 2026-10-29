@@ -426,11 +426,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun onHoverInfo(info: HoverInfo?) {
-        if (!_prefs.value.hoverToolbar) {
-            _hover.value = null
-        } else {
-            _hover.value = info
-        }
+        _hover.value = info
     }
 
     fun previewNote(pitch: Int, velocity: Int) {
@@ -834,11 +830,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _prefs.value = _prefs.value.copy(autoScroll = on)
     }
 
-    fun setHoverToolbar(on: Boolean) {
-        _prefs.value = _prefs.value.copy(hoverToolbar = on)
-        if (!on) _hover.value = null
-    }
-
     fun setFingerEditing(on: Boolean) {
         _prefs.value = _prefs.value.copy(fingerEditing = on)
     }
@@ -871,61 +862,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         restoreSnapshot(snapshot)
         updateHistoryCounts()
         postMessage("やり直しました")
-    }
-
-    // ---------------------------------------------------------------------
-    // Hover toolbar actions
-    // ---------------------------------------------------------------------
-
-    fun hoverAddAtCurrent() {
-        val h = _hover.value ?: return
-        addNoteAt(h.ghostPitch, h.ghostStart, h.ghostDurationTicks)
-    }
-
-    fun hoverDuplicate() {
-        _hover.value?.noteId?.let { duplicateNote(it) }
-    }
-
-    fun hoverDelete() {
-        _hover.value?.noteId?.let { deleteNotes(setOf(it)) }
-    }
-
-    fun hoverResize(direction: Int) {
-        val h = _hover.value ?: return
-        val id = h.noteId ?: return
-        val p = project() ?: return
-        val note = p.noteById(id) ?: return
-        val step = _prefs.value.grid.let {
-            if (it == GridUnit.OFF) _prefs.value.inputDuration.ticks(p.ppq)
-            else it.ticks(p.ppq)
-        }
-        if (h.zone == HoverZone.NOTE_START) {
-            // "Longer" at the start edge moves the start earlier while keeping
-            // the end fixed; "shorter" moves it later.
-            val newStart = (note.startTick - direction * step)
-                .coerceIn(0, note.endTick - 1)
-            val updated = note.copy(
-                startTick = newStart,
-                durationTicks = note.endTick - newStart,
-            )
-            if (updated == note) return
-            pushUndo()
-            applyNotes(p.notes.map { if (it.id == id) updated else it }, p)
-            previewNote(updated.pitch, updated.velocity)
-        } else {
-            resizeNoteBy(id, direction * step)
-        }
-    }
-
-    fun hoverCycleInputDuration() = cycleInputDuration()
-    fun hoverCycleGrid() = cycleGrid()
-
-    /** Cycles the input velocity through musically useful levels from the hover bar. */
-    fun hoverCycleInputVelocity() {
-        val values = listOf(32, 48, 64, 80, 96, 112, 127)
-        val current = _prefs.value.inputVelocity
-        val next = values.firstOrNull { it > current } ?: values.first()
-        setInputVelocity(next)
     }
 
     // ---------------------------------------------------------------------

@@ -33,7 +33,6 @@ data class EditorPrefs(
     val snapEnabled: Boolean = true,
     val inputVelocity: Int = 96,
     val autoScroll: Boolean = true,
-    val hoverToolbar: Boolean = true,
     val fingerEditing: Boolean = true,
     val penOnlySelection: Boolean = false,
     val showSustainLane: Boolean = false,
@@ -203,7 +202,6 @@ object ProjectStore {
         json.put("snap", prefs.snapEnabled)
         json.put("velocity", prefs.inputVelocity)
         json.put("autoScroll", prefs.autoScroll)
-        json.put("hoverToolbar", prefs.hoverToolbar)
         json.put("fingerEditing", prefs.fingerEditing)
         json.put("penOnlySelection", prefs.penOnlySelection)
         json.put("showSustainLane", prefs.showSustainLane)
@@ -351,7 +349,6 @@ object ProjectStore {
             snapEnabled = json.optBoolean("snap", true),
             inputVelocity = json.optInt("velocity", 96).coerceIn(1, 127),
             autoScroll = json.optBoolean("autoScroll", true),
-            hoverToolbar = json.optBoolean("hoverToolbar", true),
             fingerEditing = json.optBoolean("fingerEditing", true),
             penOnlySelection = json.optBoolean("penOnlySelection", false),
             showSustainLane = json.optBoolean("showSustainLane", false),

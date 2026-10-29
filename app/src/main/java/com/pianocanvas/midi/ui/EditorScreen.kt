@@ -6,7 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -30,7 +28,6 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
@@ -110,12 +107,10 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -126,7 +121,6 @@ import com.pianocanvas.midi.editor.BootState
 import com.pianocanvas.midi.editor.EditorUiState
 import com.pianocanvas.midi.editor.EditorViewModel
 import com.pianocanvas.midi.editor.HoverInfo
-import com.pianocanvas.midi.editor.HoverZone
 import com.pianocanvas.midi.editor.MidiUiState
 import com.pianocanvas.midi.editor.RollHost
 import com.pianocanvas.midi.editor.TabInfo
@@ -135,7 +129,6 @@ import com.pianocanvas.midi.editor.ViewCommand
 import com.pianocanvas.midi.model.GridUnit
 import com.pianocanvas.midi.model.MeterMap
 import com.pianocanvas.midi.model.Project
-import com.pianocanvas.midi.model.noteName
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -268,7 +261,15 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 16.dp)
-                    .padding(bottom = if (project != null) 102.dp else 24.dp),
+                    .padding(
+                        // While a note is selected the dock can be two rows
+                        // tall, so lift the snackbar clear of both rows.
+                        bottom = when {
+                            project == null -> 24.dp
+                            state.selection.isNotEmpty() -> 168.dp
+                            else -> 102.dp
+                        }
+                    ),
             )
         }
     }
@@ -528,7 +529,7 @@ private fun EditorScreen(
                 onMeta = { showMeta = true },
                 onMidiInput = { vm.refreshMidiDevices(); showMidiInput = true },
             )
-            BoxWithConstraints(
+            Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -556,20 +557,12 @@ private fun EditorScreen(
                         .fillMaxSize()
                         .clipToBounds(),
                 )
-                if (hover != null && ui.prefs.hoverToolbar) {
-                    HoverToolbar(
-                        hover = hover,
-                        ui = ui,
-                        vm = vm,
-                        maxWidth = maxWidth,
-                        maxHeight = maxHeight,
-                    )
-                }
             }
             ContextDock(
                 ui = ui,
                 project = project,
                 vm = vm,
+                wide = !compact,
                 onSettings = { showSettings = true },
                 onVelocity = { showVelocity = true },
                 onLength = { showLength = true },
@@ -1444,6 +1437,7 @@ private fun ContextDock(
     ui: EditorUiState,
     project: Project,
     vm: EditorViewModel,
+    wide: Boolean,
     onSettings: () -> Unit,
     onVelocity: () -> Unit,
     onLength: () -> Unit,
@@ -1455,7 +1449,9 @@ private fun ContextDock(
     onInspector: () -> Unit,
 ) {
     val selectionCount = ui.selection.size
-    val actions = buildList {
+    // Contextual actions change with the selection: input controls while
+    // nothing is selected, note editing once a note is selected.
+    val contextActions = buildList {
             if (selectionCount == 0) {
                 add(
                     DockAction(
@@ -1649,6 +1645,11 @@ private fun ContextDock(
                     )
                 }
             }
+        }
+        // The always-available bottom menu: bar navigation, zoom, loop and
+        // settings. On a roomy screen this keeps its own row so the note edit
+        // menu never pushes it out of view.
+        val alwaysActions = buildList {
             add(
                 DockAction(
                     id = "barPrev",
@@ -1707,6 +1708,9 @@ private fun ContextDock(
                 )
             )
         }
+        // Wide screens get a two-tier dock while a note is selected: the note
+        // edit menu on top, the always-available menu bar below it.
+        val twoTier = wide && selectionCount > 0
 
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 12.dp) {
         Column {
@@ -1754,15 +1758,32 @@ private fun ContextDock(
                     color = Mist.copy(alpha = 0.7f),
                 )
             }
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(actions, key = { it.id }) { action ->
-                    DockButton(action)
-                }
+            DockActionRow(contextActions)
+            if (twoTier) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .height(1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                )
+                DockActionRow(alwaysActions)
+            } else {
+                DockActionRow(contextActions + alwaysActions)
             }
+        }
+    }
+}
+
+@Composable
+private fun DockActionRow(actions: List<DockAction>) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(actions, key = { it.id }) { action ->
+            DockButton(action)
         }
     }
 }
@@ -1785,204 +1806,6 @@ private fun DockButton(action: DockAction) {
             )
             .clickable(enabled = action.enabled, onClick = action.onClick)
             .padding(vertical = 5.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(action.icon, contentDescription = action.label, tint = tint, modifier = Modifier.size(21.dp))
-        Spacer(Modifier.height(3.dp))
-        Text(
-            action.label,
-            color = tint,
-            fontSize = 9.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-// ----------------------------------------------------------------------
-// Stylus hover toolbar
-// ----------------------------------------------------------------------
-
-@Composable
-private fun HoverToolbar(
-    hover: HoverInfo,
-    ui: EditorUiState,
-    vm: EditorViewModel,
-    maxWidth: Dp,
-    maxHeight: Dp,
-) {
-    val actions = buildList {
-        if (hover.noteId == null) {
-            add(
-                HoverAction(
-                    icon = Icons.Rounded.Add,
-                    label = "追加",
-                    accent = true,
-                    onClick = {
-                        vm.hoverAddAtCurrent()
-                        vm.onHoverInfo(null)
-                    },
-                )
-            )
-            add(
-                HoverAction(
-                    icon = Icons.Rounded.Straighten,
-                    label = ui.prefs.inputDuration.label,
-                    onClick = vm::hoverCycleInputDuration,
-                )
-            )
-            add(
-                HoverAction(
-                    icon = Icons.Rounded.GridOn,
-                    label = ui.prefs.grid.label,
-                    onClick = vm::hoverCycleGrid,
-                )
-            )
-            add(
-                HoverAction(
-                    icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                    label = "v${ui.prefs.inputVelocity}",
-                    onClick = vm::hoverCycleInputVelocity,
-                )
-            )
-        } else {
-            val atEdge = hover.zone == HoverZone.NOTE_START || hover.zone == HoverZone.NOTE_END
-            add(
-                HoverAction(
-                    icon = Icons.Rounded.FileCopy,
-                    label = "複製",
-                    onClick = {
-                        vm.hoverDuplicate()
-                        vm.onHoverInfo(null)
-                    },
-                )
-            )
-            add(
-                HoverAction(
-                    icon = Icons.Rounded.Delete,
-                    label = "削除",
-                    onClick = {
-                        vm.hoverDelete()
-                        vm.onHoverInfo(null)
-                    },
-                )
-            )
-            // Body drag is the move gesture, so resize buttons only appear
-            // when the pen is actually over an edge.
-            if (atEdge) {
-                add(
-                    HoverAction(
-                        icon = Icons.Rounded.Straighten,
-                        label = "短く",
-                        onClick = { vm.hoverResize(-1) },
-                    )
-                )
-                add(
-                    HoverAction(
-                        icon = Icons.Rounded.Straighten,
-                        label = "長く",
-                        accent = true,
-                        onClick = { vm.hoverResize(1) },
-                    )
-                )
-            }
-            add(
-                HoverAction(
-                    icon = Icons.Rounded.Edit,
-                    label = "編集",
-                    onClick = {
-                        hover.noteId?.let(vm::requestNoteInspector)
-                        vm.onHoverInfo(null)
-                    },
-                )
-            )
-        }
-    }
-
-    val density = LocalDensity.current
-    val anchorX = with(density) { hover.xPx.toDp() }
-    val anchorY = with(density) { hover.yPx.toDp() }
-    val toolbarWidth = (actions.size * 56 + 104).dp
-    val toolbarHeight = 64.dp
-    val x = (anchorX - toolbarWidth / 2f)
-        .coerceIn(8.dp, (maxWidth - toolbarWidth - 8.dp).coerceAtLeast(8.dp))
-    val above = anchorY - toolbarHeight - 20.dp
-    val below = anchorY + 30.dp
-    val y = (if (above >= 8.dp) above else below)
-        .coerceIn(8.dp, (maxHeight - toolbarHeight - 8.dp).coerceAtLeast(8.dp))
-
-    Surface(
-        modifier = Modifier
-            .offset(x = x, y = y)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
-        color = PanelHigh,
-        contentColor = Paper,
-        shadowElevation = 12.dp,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                Modifier
-                    .width(84.dp)
-                    .height(56.dp)
-                    .padding(start = 8.dp, end = 4.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    noteName(hover.notePitch ?: hover.pitch),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Paper,
-                    maxLines = 1,
-                )
-                Text(
-                    hover.barBeatLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-                Text(
-                    "t${hover.noteStart ?: hover.snappedTick} · " +
-                        "${hover.noteDuration ?: hover.ghostDurationTicks}t",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Mist,
-                    maxLines = 1,
-                )
-            }
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .height(36.dp)
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
-            )
-            actions.forEach { action ->
-                HoverActionButton(action)
-            }
-        }
-    }
-}
-
-private data class HoverAction(
-    val icon: ImageVector,
-    val label: String,
-    val accent: Boolean = false,
-    val onClick: () -> Unit,
-)
-
-@Composable
-private fun HoverActionButton(action: HoverAction) {
-    val tint = if (action.accent) MaterialTheme.colorScheme.primary else Paper
-    Column(
-        modifier = Modifier
-            .width(54.dp)
-            .height(56.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (action.accent) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
-            .clickable(onClick = action.onClick)
-            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

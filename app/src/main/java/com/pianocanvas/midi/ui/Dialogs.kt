@@ -44,7 +44,6 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Settings
@@ -791,13 +790,6 @@ fun SettingsDialog(
             onCheckedChange = vm::setFingerEditing,
         )
         ToggleRow(
-            title = "ペンのホバーツールバー",
-            description = "ペンを浮かせたときに文脈メニューを表示",
-            icon = Icons.Rounded.PanTool,
-            checked = ui.prefs.hoverToolbar,
-            onCheckedChange = vm::setHoverToolbar,
-        )
-        ToggleRow(
             title = "再生中の自動スクロール",
             description = "再生位置が画面外に出たら追従します",
             icon = Icons.Rounded.Swipe,
@@ -1072,7 +1064,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
             "ペン（スタイラス）",
             Icons.Rounded.Edit,
             listOf(
-                "ペンを浮かせる : ゴースト音符と対象ノートがハイライトされます。位置に応じたツールバーが出ます。",
+                "ペンを浮かせる : ゴースト音符と対象ノートがハイライトされます。",
                 "空欄をドラッグ : 音符の長さを描いて追加します。離した時点で確定します。",
                 "音符の中央をドラッグ : 選択中の音符をまとめて移動します。",
                 "音符の左右の端をドラッグ : 長さを変更します。端の判定にはヒステリシスがあります。",
