@@ -1447,71 +1447,69 @@ private fun ContextDock(
     onInspector: () -> Unit,
 ) {
     val selectionCount = ui.selection.size
-    // The unselected bar: input controls shown when nothing is selected. It
-    // stays as the bottom row even while notes are selected.
+    // The unselected bar: input controls plus the persistent bottom items. It
+    // stays as the bottom row whether or not notes are selected.
     val unselectedActions = buildList {
-            if (selectionCount == 0) {
-                add(
-                    DockAction(
-                        id = "grid",
-                        icon = if (ui.prefs.grid == GridUnit.OFF) Icons.Rounded.GridOff else Icons.Rounded.GridOn,
-                        label = "グリッド ${ui.prefs.grid.label}",
-                        active = ui.prefs.grid != GridUnit.OFF,
-                        onClick = vm::cycleGrid,
-                    )
-                )
-                add(
-                    DockAction(
-                        id = "length",
-                        icon = Icons.Rounded.Straighten,
-                        label = "長さ ${ui.prefs.inputDuration.label}",
-                        onClick = vm::cycleInputDuration,
-                    )
-                )
-                add(
-                    DockAction(
-                        id = "snap",
-                        icon = if (ui.prefs.snapEnabled) Icons.Rounded.Check else Icons.Rounded.Close,
-                        label = "スナップ ${if (ui.prefs.snapEnabled) "ON" else "OFF"}",
-                        active = ui.prefs.snapEnabled,
-                        onClick = { vm.setSnapEnabled(!ui.prefs.snapEnabled) },
-                    )
-                )
-                add(
-                    DockAction(
-                        id = "velocity",
-                        icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                        label = "入力 v${ui.prefs.inputVelocity}",
-                        onClick = onInputVelocity,
-                    )
-                )
-                add(
-                    DockAction(
-                        id = "quantizeAll",
-                        icon = Icons.Rounded.AutoFixHigh,
-                        label = "全クオンタイズ",
-                        enabled = project.notes.isNotEmpty(),
-                        onClick = vm::quantizeAll,
-                    )
-                )
-                add(
-                    DockAction(
-                        id = "selectAll",
-                        icon = Icons.Rounded.SelectAll,
-                        label = "全選択",
-                        enabled = project.notes.isNotEmpty(),
-                        onClick = vm::selectAll,
-                    )
-                )
-                add(
-                    DockAction(
-                        id = "paste",
-                        icon = Icons.Rounded.ContentPaste,
-                        label = "貼り付け",
-                        onClick = vm::pasteAtPlayhead,
-                    )
-                )
-            }
+        add(
+            DockAction(
+                id = "grid",
+                icon = if (ui.prefs.grid == GridUnit.OFF) Icons.Rounded.GridOff else Icons.Rounded.GridOn,
+                label = "グリッド ${ui.prefs.grid.label}",
+                active = ui.prefs.grid != GridUnit.OFF,
+                onClick = vm::cycleGrid,
+            )
+        )
+        add(
+            DockAction(
+                id = "length",
+                icon = Icons.Rounded.Straighten,
+                label = "長さ ${ui.prefs.inputDuration.label}",
+                onClick = vm::cycleInputDuration,
+            )
+        )
+        add(
+            DockAction(
+                id = "snap",
+                icon = if (ui.prefs.snapEnabled) Icons.Rounded.Check else Icons.Rounded.Close,
+                label = "スナップ ${if (ui.prefs.snapEnabled) "ON" else "OFF"}",
+                active = ui.prefs.snapEnabled,
+                onClick = { vm.setSnapEnabled(!ui.prefs.snapEnabled) },
+            )
+        )
+        add(
+            DockAction(
+                id = "velocity",
+                icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                label = "入力 v${ui.prefs.inputVelocity}",
+                onClick = onInputVelocity,
+            )
+        )
+        add(
+            DockAction(
+                id = "quantizeAll",
+                icon = Icons.Rounded.AutoFixHigh,
+                label = "全クオンタイズ",
+                enabled = project.notes.isNotEmpty(),
+                onClick = vm::quantizeAll,
+            )
+        )
+        add(
+            DockAction(
+                id = "selectAll",
+                icon = Icons.Rounded.SelectAll,
+                label = "全選択",
+                enabled = project.notes.isNotEmpty(),
+                onClick = vm::selectAll,
+            )
+        )
+        add(
+            DockAction(
+                id = "paste",
+                icon = Icons.Rounded.ContentPaste,
+                label = "貼り付け",
+                onClick = vm::pasteAtPlayhead,
+            )
+        )
     }
     // Note editing actions: an extra bar layered on top of the unselected bar
     // while notes are selected.
