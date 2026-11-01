@@ -36,7 +36,7 @@ class PianoSynth(
     private val renderThread: Thread
     @Volatile private var running = true
     @Volatile private var sustainOn = false
-    @Volatile private var masterVolume = 0.62f
+    @Volatile private var masterVolume = 1.24f
     @Volatile private var lastError: String? = null
     private val chunkFrames = 256
 
@@ -392,7 +392,7 @@ class PianoSynth(
 
         private val voices = ArrayList<Voice>(64)
         private var sustainOn = false
-        private val masterVolume = 0.62f
+        private val masterVolume = 1.24f
 
         fun noteOn(pitch: Int, velocity: Int, channel: Int = 0) {
             startNote(pitch.coerceIn(0, 127), velocity.coerceIn(1, 127), channel and 0x0F)
