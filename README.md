@@ -4,7 +4,7 @@ Android タブレット向けの、ピアノ専用 MIDI エディタです。Kot
 ピアノロールだけはスタイラスホバーと細かいポインタ制御のため、独自の `View` + `Canvas` で描画・操作しています。
 WebView や Web アプリは使用していません。
 
-- パッケージ: `com.pianocanvas.midi`
+- パッケージ: `com.midiedit.midi`
 - アプリ名: MIDIeditmobile
 - minSdk 26 / targetSdk 34
 - 内蔵音源: 同梱の `app/src/main/assets/piano.sf2`（自前生成・CC0）
@@ -235,7 +235,7 @@ BPM・拍子変更に対応（最大 60 段）。
 ## アーキテクチャ
 
 ```
-app/src/main/java/com/pianocanvas/midi/
+app/src/main/java/com/midiedit/midi/
 ├── MainActivity.kt            単一 Activity。ACTION_VIEW と自動保存の起動順を制御
 ├── model/Model.kt             Note / Track / Project / TempoMap / MeterMap / GridUnit
 ├── midi/MidiFile.kt           依存ライブラリなしの SMF パーサ・ライタ

@@ -98,7 +98,7 @@ jobs:
           body: |
             MIDIeditmobile の Android APK です。
 
-            - パッケージ: `com.pianocanvas.midi`
+            - パッケージ: `com.midiedit.midi`
             - 対応バージョン: Android 8.0 (API 26) 以上
             - 署名: デバッグ署名（サイドロードでの動作確認用）
 

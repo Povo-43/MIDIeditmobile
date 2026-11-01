@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.pianocanvas.midi"
+    namespace = "com.midiedit.midi"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.pianocanvas.midi"
+        applicationId = "com.midiedit.midi"
         minSdk = 26
         targetSdk = 34
         versionCode = 13
