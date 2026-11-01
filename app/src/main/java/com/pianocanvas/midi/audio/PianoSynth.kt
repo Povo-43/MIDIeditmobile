@@ -378,4 +378,123 @@ class PianoSynth(
         }
 
     }
+
+    /**
+     * Synchronous, AudioTrack-free rendering path used for offline export.
+     * Mirrors the realtime synth core (same [Voice] implementation and same
+     * saturation curve) but runs on the caller's thread and never touches
+     * audio hardware.
+     */
+    internal class Offline(
+        private val soundFont: SoundFont,
+        private val outputSampleRate: Int = 44100,
+    ) : AutoCloseable {
+
+        private val voices = ArrayList<Voice>(64)
+        private var sustainOn = false
+        private val masterVolume = 0.62f
+
+        fun noteOn(pitch: Int, velocity: Int, channel: Int = 0) {
+            startNote(pitch.coerceIn(0, 127), velocity.coerceIn(1, 127), channel and 0x0F)
+        }
+
+        fun noteOff(pitch: Int, channel: Int = 0) {
+            stopNote(pitch.coerceIn(0, 127), channel and 0x0F)
+        }
+
+        fun setSustain(on: Boolean) {
+            sustainOn = on
+            if (!on) {
+                for (v in voices) {
+                    if (v.heldBySustain) {
+                        v.heldBySustain = false
+                        v.release()
+                    }
+                }
+            }
+        }
+
+        fun allNotesOff(fast: Boolean = false) {
+            sustainOn = false
+            for (v in voices) {
+                v.heldBySustain = false
+                v.release(fast = fast)
+            }
+        }
+
+        /**
+         * Renders `frames` interleaved stereo 16-bit frames into `out`
+         * starting at `outOffset`. Same soft saturation as the realtime path
+         * to keep exports sounding identical to playback.
+         */
+        fun renderPcm16(out: ShortArray, outOffset: Int, frames: Int) {
+            val floatBuffer = FloatArray(frames * 2)
+            renderVoices(floatBuffer, frames)
+            for (i in 0 until frames) {
+                out[outOffset + i * 2] = toPcm16(floatBuffer[i * 2])
+                out[outOffset + i * 2 + 1] = toPcm16(floatBuffer[i * 2 + 1])
+            }
+        }
+
+        private fun toPcm16(sample: Float): Short {
+            // Soft saturation keeps dense chords from hard clipping.
+            var x = sample * masterVolume
+            if (x > -3f && x < 3f) {
+                val x2 = x * x
+                x = x * (27f + x2) / (27f + 9f * x2)
+            } else {
+                x = x.coerceIn(-1f, 1f)
+            }
+            return (x.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+        }
+
+        private fun startNote(pitch: Int, velocity: Int, channel: Int) {
+            // A retriggered key damps the previous voice of the same pitch.
+            for (v in voices) {
+                if (v.pitch == pitch && v.channel == channel && v.heldBySustain) {
+                    v.heldBySustain = false
+                    v.release()
+                }
+            }
+            var started = 0
+            for (region in soundFont.regions) {
+                if (pitch < region.keyLow || pitch > region.keyHigh) continue
+                if (velocity < region.velocityLow || velocity > region.velocityHigh) continue
+                if (started >= 4) break
+                val voice = Voice(region, pitch, velocity, channel, outputSampleRate, soundFont.sampleData)
+                if (voice.done) continue
+                voices += voice
+                started++
+            }
+            if (voices.size > 96) {
+                val victim = voices.firstOrNull { it.released } ?: voices.first()
+                voices.remove(victim)
+            }
+        }
+
+        private fun stopNote(pitch: Int, channel: Int) {
+            for (v in voices) {
+                if (!v.released && v.pitch == pitch && v.channel == channel) {
+                    if (sustainOn) {
+                        v.heldBySustain = true
+                    } else {
+                        v.release()
+                    }
+                }
+            }
+        }
+
+        private fun renderVoices(buffer: FloatArray, frames: Int) {
+            val it = voices.iterator()
+            while (it.hasNext()) {
+                val v = it.next()
+                v.render(buffer, frames)
+                if (v.done) it.remove()
+            }
+        }
+
+        override fun close() {
+            voices.clear()
+        }
+    }
 }

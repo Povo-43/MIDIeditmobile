@@ -12,8 +12,8 @@ android {
         applicationId = "com.pianocanvas.midi"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.1.9"
+        versionCode = 12
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -59,6 +59,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Pure-Java LAME port used to export MP3 files (LGPL v2.1+).
+    implementation("de.sciss:jump3r:1.0.5")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

@@ -173,6 +173,17 @@ git push origin v1.0.0
 - 現在のプロジェクトを `.mid` として書き出し、Android の共有シート（メール・クラウド等）へ送信
 - 一時ファイルはアプリのキャッシュ領域に置き、FileProvider 経由で安全に受け渡し
 
+### 音声書き出し（MP3 / AAC）
+
+- メニューの「MP3 音声を書き出す」「AAC 音声を書き出す (.m4a)」から、
+  現在編集中の MIDI を音源で演奏した音のまま音声ファイルとして保存
+- 書き出しに使うのは、再生に利用している SoundFont（内蔵ピアノまたは読み込んだ SF2）
+- MP3 は jump3r（LAME の Java 移植、192kbps CBR）、AAC は OS 標準の
+  MediaCodec エンコーダ（192kbps、AAC-LC、MP4 コンテナ）で書き出す
+- サステイン（CC64）を含む複数トラック中のアクティブトラックを対象に、
+  テンポ変更に追従したオフラインレンダリングで時間を切らずに出力
+- 保存先は SAF (CreateDocument) で任意に指定できるため、追加の権限は不要
+
 ### MIDI META
 
 - 著作権（Copyright）、キー（Key Signature、長調／短調）、作曲者・作詞者・コメントのテキストを編集
@@ -291,7 +302,7 @@ SF3 / Ogg 圧縮、ステレオペア、モジュレータ、フィルタ、LFO 
 このリポジトリでは以下を確認済みです。
 
 ```text
-./gradlew :app:testDebugUnitTest   BUILD SUCCESSFUL  (33 tests, 0 failures)
+./gradlew :app:testDebugUnitTest   BUILD SUCCESSFUL  (36 tests, 0 failures)
 ./gradlew :app:assembleDebug       BUILD SUCCESSFUL
 aapt2 dump badging                 パッケージ / minSdk 26 / targetSdk 34 を確認
 ```
@@ -303,6 +314,8 @@ aapt2 dump badging                 パッケージ / minSdk 26 / targetSdk 34 �
   META（著作権・キー・テキスト）の往復と重複防止
 - モデル: グリッドと 3連符、スナップ、テンポ／拍子マップ、音名、黒鍵、曲末計算
 - 音源: 同梱 SF2 のリージョン範囲・サンプルレート・ループ・鍵盤カバレッジ、不正ファイル拒否
+- 音声書き出し: SoundFont でのオフライン PCM レンダリング（無音でないこと・
+  空プロジェクトで空になること）、MP3 のフレーム同期確認
 
 **未検証**: この開発環境にはエミュレータ / KVM / adb 接続端末がないため、
 実機でのスタイラスホバー、音声出力、SAF の画面遷移は実行確認できていません。

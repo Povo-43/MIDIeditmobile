@@ -27,6 +27,7 @@ class AudioEngine(private val context: Context) {
     val status: StateFlow<AudioStatus> = _status.asStateFlow()
 
     @Volatile private var synth: PianoSynth? = null
+    @Volatile private var font: SoundFont? = null
     private var loadToken = 0
 
     fun loadBundled() {
@@ -71,10 +72,14 @@ class AudioEngine(private val context: Context) {
         }
         val old = synth
         synth = newSynth
+        this.font = font
         _status.value = AudioStatus.Ready(font.name, font.presetName, font.regionCount)
         old?.allNotesOff()
         old?.close()
     }
+
+    /** The SoundFont currently used by the realtime synth, if loaded. */
+    fun activeSoundFont(): SoundFont? = font
 
     fun noteOn(pitch: Int, velocity: Int, channel: Int = 0) {
         synth?.noteOn(pitch, velocity, channel)
@@ -104,6 +109,7 @@ class AudioEngine(private val context: Context) {
         loadToken++
         synth?.close()
         synth = null
+        font = null
         _status.value = AudioStatus.Loading
     }
 }

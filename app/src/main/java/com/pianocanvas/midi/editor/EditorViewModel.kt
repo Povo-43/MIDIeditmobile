@@ -9,6 +9,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pianocanvas.midi.audio.AudioEngine
+import com.pianocanvas.midi.audio.AudioExporter
+import com.pianocanvas.midi.audio.AudioExportFormat
 import com.pianocanvas.midi.audio.AudioStatus
 import com.pianocanvas.midi.audio.PlaybackEngine
 import com.pianocanvas.midi.audio.SoundFontLoader
@@ -122,6 +124,7 @@ data class MidiUiState(
 sealed interface UiCommand {
     data object ImportMidi : UiCommand
     data object ExportMidi : UiCommand
+    data class ExportAudio(val format: AudioExportFormat) : UiCommand
     data class Share(val uri: Uri, val mimeType: String, val title: String) : UiCommand
 }
 
@@ -1093,6 +1096,12 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         return "$safe.mid"
     }
 
+    fun suggestedAudioFileName(format: AudioExportFormat): String {
+        val title = _project.value?.title ?: "piano"
+        val safe = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "piano" }
+        return "$safe.${format.extension}"
+    }
+
     fun importMidi(uri: Uri) {
         if (_boot.value is BootState.Loading) {
             pendingImport = uri
@@ -1167,6 +1176,46 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
             result.fold(
                 onSuccess = { postMessage("MIDIファイルを書き出しました") },
+                onFailure = { t -> postMessage("書き出しに失敗しました: ${t.message ?: t.javaClass.simpleName}") }
+            )
+            _busy.value = _busy.value.copy(exporting = false)
+        }
+    }
+
+    /**
+     * Renders the active track through the currently loaded SoundFont and
+     * writes an MP3 or AAC file to [uri].
+     */
+    fun exportAudio(uri: Uri, format: AudioExportFormat) {
+        val p = _project.value ?: return
+        if (_busy.value.exporting) return
+        if (p.track.notes.isEmpty()) {
+            postMessage("ノートがないため音声を書き出せません")
+            return
+        }
+        playback.pause()
+        _busy.value = _busy.value.copy(exporting = true)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val font = audio.activeSoundFont()
+                        ?: throw IOException("音源が準備できていません")
+                    val pcm = AudioExporter.renderPcm(p, font)
+                    if (pcm.isEmpty()) throw IOException("書き出す音がありません")
+                    when (format) {
+                        AudioExportFormat.MP3 ->
+                            app.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                                AudioExporter.encodeMp3(pcm, out)
+                            } ?: throw IOException("保存先を開けません")
+                        AudioExportFormat.AAC ->
+                            app.contentResolver.openFileDescriptor(uri, "rwt")?.use { fd ->
+                                AudioExporter.encodeAac(pcm, fd.fileDescriptor)
+                            } ?: throw IOException("保存先を開けません")
+                    }
+                }
+            }
+            result.fold(
+                onSuccess = { postMessage("${format.label}を書き出しました") },
                 onFailure = { t -> postMessage("書き出しに失敗しました: ${t.message ?: t.javaClass.simpleName}") }
             )
             _busy.value = _busy.value.copy(exporting = false)
@@ -1346,6 +1395,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun requestExport() {
         _uiCommands.tryEmit(UiCommand.ExportMidi)
+    }
+
+    fun requestAudioExport(format: AudioExportFormat) {
+        _uiCommands.tryEmit(UiCommand.ExportAudio(format))
     }
 
     // ---------------------------------------------------------------------

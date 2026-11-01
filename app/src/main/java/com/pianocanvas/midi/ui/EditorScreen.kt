@@ -115,6 +115,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pianocanvas.midi.audio.AudioExportFormat
 import com.pianocanvas.midi.audio.AudioStatus
 import com.pianocanvas.midi.editor.AutosaveState
 import com.pianocanvas.midi.editor.BootState
@@ -161,6 +162,12 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
         val exportLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("audio/midi")
         ) { uri -> uri?.let(vm::exportMidi) }
+        val mp3ExportLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("audio/mpeg")
+        ) { uri -> uri?.let { vm.exportAudio(it, AudioExportFormat.MP3) } }
+        val aacExportLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("audio/mp4")
+        ) { uri -> uri?.let { vm.exportAudio(it, AudioExportFormat.AAC) } }
         val soundFontLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.OpenDocument()
         ) { uri -> uri?.let(vm::loadExternalSoundFont) }
@@ -176,6 +183,14 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
             )
         }
         val onExport: () -> Unit = { exportLauncher.launch(vm.suggestedFileName()) }
+        val onExportAudio: (AudioExportFormat) -> Unit = { format ->
+            when (format) {
+                AudioExportFormat.MP3 ->
+                    mp3ExportLauncher.launch(vm.suggestedAudioFileName(format))
+                AudioExportFormat.AAC ->
+                    aacExportLauncher.launch(vm.suggestedAudioFileName(format))
+            }
+        }
         val onLoadSoundFont: () -> Unit = {
             // "*/*" keeps .sf2 files visible on pickers that filter by MIME.
             soundFontLauncher.launch(arrayOf("*/*"))
@@ -188,6 +203,7 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
                 when (command) {
                     UiCommand.ImportMidi -> onImport()
                     UiCommand.ExportMidi -> onExport()
+                    is UiCommand.ExportAudio -> onExportAudio(command.format)
                     is UiCommand.Share -> {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = command.mimeType
@@ -220,6 +236,7 @@ fun MidiEditMobileApp(vm: EditorViewModel, initialUri: String? = null) {
                     vm = vm,
                     onImport = onImport,
                     onExport = onExport,
+                    onExportAudio = onExportAudio,
                     onLoadSoundFont = onLoadSoundFont,
                     onShare = vm::shareMidi,
                 )
@@ -429,6 +446,7 @@ private fun EditorScreen(
     vm: EditorViewModel,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    onExportAudio: (AudioExportFormat) -> Unit,
     onLoadSoundFont: () -> Unit,
     onShare: () -> Unit,
 ) {
@@ -520,6 +538,7 @@ private fun EditorScreen(
                 onNew = { showNewConfirm = true },
                 onImport = onImport,
                 onExport = onExport,
+                onExportAudio = onExportAudio,
                 onSettings = { showSettings = true },
                 onHelp = { showHelp = true },
                 onRename = { showRename = true },
@@ -749,6 +768,7 @@ private fun TopBar(
     onNew: () -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    onExportAudio: (AudioExportFormat) -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
     onRename: () -> Unit,
@@ -775,6 +795,7 @@ private fun TopBar(
                     onNew = onNew,
                     onImport = onImport,
                     onExport = onExport,
+                    onExportAudio = onExportAudio,
                     onSettings = onSettings,
                     onHelp = onHelp,
                     onLoadSoundFont = onLoadSoundFont,
@@ -794,6 +815,7 @@ private fun TopBar(
                     onNew = onNew,
                     onImport = onImport,
                     onExport = onExport,
+                    onExportAudio = onExportAudio,
                     onSettings = onSettings,
                     onHelp = onHelp,
                     onLoadSoundFont = onLoadSoundFont,
@@ -834,6 +856,7 @@ private fun WideTopRow(
     onNew: () -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    onExportAudio: (AudioExportFormat) -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
     onLoadSoundFont: () -> Unit,
@@ -881,6 +904,7 @@ private fun WideTopRow(
             onNew = onNew,
             onImport = onImport,
             onExport = onExport,
+            onExportAudio = onExportAudio,
             onSoundFont = onLoadSoundFont,
             onSettings = onSettings,
             onHelp = onHelp,
@@ -903,6 +927,7 @@ private fun CompactTopRows(
     onNew: () -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    onExportAudio: (AudioExportFormat) -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
     onLoadSoundFont: () -> Unit,
@@ -934,6 +959,7 @@ private fun CompactTopRows(
                 onNew = onNew,
                 onImport = onImport,
                 onExport = onExport,
+                onExportAudio = onExportAudio,
                 onSoundFont = onLoadSoundFont,
                 onSettings = onSettings,
                 onHelp = onHelp,
@@ -1301,6 +1327,7 @@ private fun OverflowMenu(
     onNew: () -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    onExportAudio: (AudioExportFormat) -> Unit,
     onSoundFont: () -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
@@ -1362,6 +1389,22 @@ private fun OverflowMenu(
                 onClick = {
                     expanded = false
                     onExport()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("MP3 音声を書き出す") },
+                leadingIcon = { Icon(Icons.Rounded.GraphicEq, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onExportAudio(AudioExportFormat.MP3)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("AAC 音声を書き出す (.m4a)") },
+                leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onExportAudio(AudioExportFormat.AAC)
                 },
             )
             DropdownMenuItem(
