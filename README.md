@@ -8,7 +8,7 @@ WebView や Web アプリは使用していません。
 - アプリ名: MIDIeditmobile
 - minSdk 26 / targetSdk 34
 - 内蔵音源: 同梱の `app/src/main/assets/piano.sf2`（自前生成・CC0）
-- 出力 APK: `app/build/outputs/apk/debug/app-debug.apk`
+- 出力 APK: `app/build/outputs/apk/debug/app-debug.apk`（開発用） / `app/build/outputs/apk/release/app-release.apk`（配布用）
 
 ---
 
@@ -38,17 +38,28 @@ META（著作権・キー・テキスト）の往復、スナップ／3連符、
 
 ### GitHub Actions によるリリース
 
-`.github/workflows/android-release.yml` が、ユニットテスト・Lint・APK ビルドを実行し、
-タグ push 時は GitHub Release に APK と SHA-256 を添付します。
+`.github/workflows/android-release.yml` が、ユニットテスト・Lint・APK ビルド（`assembleRelease`）・
+APK 整合性検証（zipalign / apksigner / aapt2）を実行し、タグ push 時は GitHub Release に APK と SHA-256 を添付します。
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-- `v*` タグ: テスト → Lint → `assembleDebug` → GitHub Release 作成
+- `v*` タグ: テスト → Lint → `assembleRelease` → APK 検証 → GitHub Release 作成
 - 手動実行（Actions タブの **Build and Release APK**）: ビルドのみ行い、APK を Artifacts に保存
-- APK はデバッグ署名です。配布用のリリース署名が必要な場合は、署名設定を追加してください
+- 署名: リリース用鍵（GitHub Secrets の `RELEASE_KEYSTORE_BASE64` 等）で v1 / v2 / v3 署名します。
+  ローカルでリリースビルドする場合は `keystore/release.keystore`（Git 管理外）に鍵を置き、
+  環境変数 `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` を設定してください
+
+### インストール時の注意
+
+- **v1.2.1 以前（デバッグ署名）からのアップデートは、一度旧アプリをアンインストールしてから**新しい APK をインストールしてください。
+  署名鍵が異なるため、上書きインストールは署名競合で失敗します。
+- 「パッケージの解析中にエラーが発生しました」と出る場合は、次を確認してください:
+  1. ダウンロードしたファイルが完全か（GitHub Release の APK は約 18〜24 MB。`.sha256` で照合できます）
+  2. 端末が Android 8.0 (API 26) 以上か
+  3. 拡張子が `.apk` のままか（SNS 経由だと別名・圧縮されることがあります）
 
 ---
 
@@ -334,7 +345,7 @@ aapt2 dump badging                 パッケージ / minSdk 26 / targetSdk 34 �
 - MIDIキーボード入力は端末の Android MIDI API に対応している必要があります。
 - META の作曲者・作詞者・コメントは書き出し時に先頭の Text メタイベントへ反映され、
   読み込み時は先頭トラック先頭の Text の順に割り当てられます。
-- `assembleDebug` の APK はデバッグ署名です。配布用にはリリース署名の設定が必要です。
+- `assembleDebug` の APK はデバッグ署名です（開発用）。配布用は `assembleRelease` のリリース署名 APK を使用してください。
 - スタイラスホバーは端末のペン対応に依存します。非対応端末では指操作にフォールバックします。
 
 ---

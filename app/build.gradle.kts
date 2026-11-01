@@ -12,9 +12,31 @@ android {
         applicationId = "com.midiedit.midi"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.2.1"
+        versionCode = 14
+        versionName = "1.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            // CI provides these via environment variables (GitHub Actions secrets).
+            // Locally, keystore/release.keystore (git-ignored) is used when present.
+            val envStore = System.getenv("RELEASE_STORE_FILE")
+            val localStore = rootProject.file("keystore/release.keystore")
+            storeFile = when {
+                !envStore.isNullOrBlank() -> file(envStore)
+                localStore.exists() -> localStore
+                else -> null
+            }
+            storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+            keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+            keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            // Sign with every scheme so the APK installs on all supported devices.
+            // v1 (JAR) is mandatory for API < 24 parsers and must not be dropped.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
 
     buildTypes {
@@ -24,6 +46,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
