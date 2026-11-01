@@ -938,6 +938,36 @@ private fun AudioStatusCard(
                 Spacer(Modifier.size(6.dp))
                 Text(if (ui.soundFontCustom) "内蔵ピアノに戻す" else "内蔵ピアノを再読込")
             }
+            if (ui.soundFontCustom) {
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.VolumeUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text("音源の音量", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "${(ui.prefs.soundFontVolume * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Slider(
+                    value = ui.prefs.soundFontVolume,
+                    onValueChange = { vm.setSoundFontVolume(it) },
+                    valueRange = 0f..2f,
+                )
+                Text(
+                    "読み込んだ音源の音量を調整します（100%で標準）。内蔵ピアノには影響しません。MP3/AAC書き出しにも反映されます。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 "端末のファイルから SF2 (SoundFont 2.04) を自由に選べます。選んだファイルはアプリ内に保存され、次回起動時も使われます。SF3/Ogg 圧縮には対応していません。",

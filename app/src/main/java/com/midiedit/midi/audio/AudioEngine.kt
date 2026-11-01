@@ -28,6 +28,8 @@ class AudioEngine(private val context: Context) {
 
     @Volatile private var synth: PianoSynth? = null
     @Volatile private var font: SoundFont? = null
+    /** User volume multiplier (1 = neutral), re-applied whenever a synth is installed. */
+    @Volatile private var userVolume: Float = 1f
     private var loadToken = 0
 
     fun loadBundled() {
@@ -70,6 +72,8 @@ class AudioEngine(private val context: Context) {
             }
             return
         }
+        // Keep the settings volume across soundfont switches and restarts.
+        newSynth.setMasterVolume(userVolume)
         val old = synth
         synth = newSynth
         this.font = font
@@ -98,8 +102,12 @@ class AudioEngine(private val context: Context) {
     }
 
     fun setVolume(value: Float) {
-        synth?.setMasterVolume(value)
+        userVolume = value.coerceIn(0f, 4f)
+        synth?.setMasterVolume(userVolume)
     }
+
+    /** The user volume multiplier currently applied to the synth (1 = neutral). */
+    fun currentUserVolume(): Float = userVolume
 
     fun isReady(): Boolean = synth != null && _status.value is AudioStatus.Ready
 

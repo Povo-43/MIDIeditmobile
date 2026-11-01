@@ -384,6 +384,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             midiInput.events.collect { handleMidiInput(it) }
         }
+        // Whenever a SoundFont finishes loading, re-apply the stored external
+        // volume (or the neutral gain for the bundled piano) so the engine
+        // always matches the settings slider.
+        viewModelScope.launch {
+            audio.status.collect { status ->
+                if (status is AudioStatus.Ready) {
+                    audio.setVolume(if (_soundFontCustom.value) _prefs.value.soundFontVolume else 1f)
+                }
+            }
+        }
         viewModelScope.launch { restoreWorkspace() }
         viewModelScope.launch {
             combine(_project, _prefs, _viewport) { p, pr, v -> Triple(p, pr, v) }
@@ -841,6 +851,17 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _prefs.value = _prefs.value.copy(inputVelocity = velocity.coerceIn(1, 127))
     }
 
+    /**
+     * Volume of the loaded external SoundFont, exposed by the settings
+     * slider. Applies immediately to the running synth and, through the
+     * export path, to MP3/AAC rendering.
+     */
+    fun setSoundFontVolume(value: Float) {
+        val clamped = value.coerceIn(0f, 2f)
+        _prefs.value = _prefs.value.copy(soundFontVolume = clamped)
+        if (_soundFontCustom.value) audio.setVolume(clamped)
+    }
+
     fun setShowSustainLane(on: Boolean) {
         _prefs.value = _prefs.value.copy(showSustainLane = on)
     }
@@ -1200,7 +1221,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 runCatching {
                     val font = audio.activeSoundFont()
                         ?: throw IOException("音源が準備できていません")
-                    val pcm = AudioExporter.renderPcm(p, font)
+                    // Same gain as playback so exports match what was heard.
+                    val pcm = AudioExporter.renderPcm(p, font, audio.currentUserVolume())
                     if (pcm.isEmpty()) throw IOException("書き出す音がありません")
                     when (format) {
                         AudioExportFormat.MP3 ->
@@ -1258,6 +1280,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             withContext(Dispatchers.IO) { soundFontDir().deleteRecursively() }
             _soundFontCustom.value = false
             _soundFontFileName.value = null
+            // The bundled piano always plays at its neutral gain; the saved
+            // slider value is kept for the next external SoundFont.
+            audio.setVolume(1f)
             audio.loadBundled()
             postMessage("内蔵ピアノ音源に戻しました")
         }
@@ -1557,6 +1582,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 _tabs.value = tabs
                 _boot.value = BootState.Ready(tabs.isNotEmpty())
                 autosaveEnabled = true
+                // Prefs may arrive after a stored SoundFont finished loading;
+                // make sure its saved volume is applied once they are known.
+                if (_soundFontCustom.value) audio.setVolume(prefs.soundFontVolume)
                 if (tabs.isNotEmpty()) {
                     activateTab(active.coerceIn(0, tabs.size - 1))
                     _autosave.value = AutosaveState.Saved(System.currentTimeMillis())

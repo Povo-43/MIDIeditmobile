@@ -124,4 +124,66 @@ class SoundFontLoaderTest {
         assertEquals(font.regions.size, font.regionCount)
         assertEquals(font.regions.map { it.keyLow }.minOrNull(), font.regions.minOf { it.keyLow })
     }
+
+    // ----------------------------------------------------------------------
+    // Stereo sample pairs
+    // ----------------------------------------------------------------------
+
+    private fun stereoPairFont(): SoundFont {
+        val left = TestSf2.Sample("Tone L", ShortArray(1000) { 24000 }, sampleType = 2, sampleLink = 1)
+        val right = TestSf2.Sample("Tone R", ShortArray(1000) { -24000 }, sampleType = 1, sampleLink = 0)
+        val zones = listOf(
+            TestSf2.Zone(0, mapOf(17 to -500)),
+            TestSf2.Zone(1, mapOf(17 to 500)),
+        )
+        return SoundFontLoader.load(TestSf2.build("stereo-bank", listOf(left, right), zones))
+    }
+
+    @Test
+    fun stereoPairLoadsAsTwoSidedRegions() {
+        val font = stereoPairFont()
+        assertEquals(2, font.regions.size)
+        assertEquals(-1, font.regions.first { it.stereoSide == -1 }.stereoSide)
+        assertEquals(1, font.regions.first { it.stereoSide == 1 }.stereoSide)
+        // Both halves stay playable across the whole keyboard.
+        for (r in font.regions) {
+            assertEquals(0, r.keyLow)
+            assertEquals(127, r.keyHigh)
+        }
+    }
+
+    @Test
+    fun linkedPairSidesFollowThePartnerType() {
+        // Linked samples (type 3) have no side of their own; the partner's
+        // sampleType decides which channel they feed.
+        val left = TestSf2.Sample("Tone L", ShortArray(1000) { 24000 }, sampleType = 3, sampleLink = 1)
+        val right = TestSf2.Sample("Tone R", ShortArray(1000) { -24000 }, sampleType = 2, sampleLink = 0)
+        val zones = listOf(
+            TestSf2.Zone(0),
+            TestSf2.Zone(1),
+        )
+        val font = SoundFontLoader.load(TestSf2.build("linked-bank", listOf(left, right), zones))
+        assertEquals(2, font.regions.size)
+        assertEquals(1, font.regions.count { it.stereoSide == 1 })
+        assertEquals(1, font.regions.count { it.stereoSide == -1 })
+    }
+
+    @Test
+    fun unpairedStereoHalfFallsBackToCentredMono() {
+        // A bank referencing only the left half of a pair used to play in one
+        // ear; the orphan must be demoted to a centred mono region instead.
+        val left = TestSf2.Sample("Tone L", ShortArray(1000) { 24000 }, sampleType = 2)
+        val font = SoundFontLoader.load(
+            TestSf2.build("orphan-bank", listOf(left), listOf(TestSf2.Zone(0, mapOf(17 to -500))))
+        )
+        assertEquals(1, font.regions.size)
+        assertEquals(0, font.regions[0].stereoSide)
+    }
+
+    @Test
+    fun bundledPianoStaysCentredMono() {
+        val font = bundledFont()
+        assertTrue(font.regions.isNotEmpty())
+        assertTrue(font.regions.all { it.stereoSide == 0 })
+    }
 }

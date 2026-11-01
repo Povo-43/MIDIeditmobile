@@ -36,6 +36,8 @@ data class EditorPrefs(
     val fingerEditing: Boolean = true,
     val penOnlySelection: Boolean = false,
     val showSustainLane: Boolean = false,
+    /** Volume multiplier for a loaded external SoundFont (1 = neutral). */
+    val soundFontVolume: Float = 1f,
 )
 
 data class AutosaveData(
@@ -205,6 +207,7 @@ object ProjectStore {
         json.put("fingerEditing", prefs.fingerEditing)
         json.put("penOnlySelection", prefs.penOnlySelection)
         json.put("showSustainLane", prefs.showSustainLane)
+        json.put("soundFontVolume", prefs.soundFontVolume.toDouble())
         return json
     }
 
@@ -352,6 +355,8 @@ object ProjectStore {
             fingerEditing = json.optBoolean("fingerEditing", true),
             penOnlySelection = json.optBoolean("penOnlySelection", false),
             showSustainLane = json.optBoolean("showSustainLane", false),
+            soundFontVolume = json.optDouble("soundFontVolume", 1.0)
+                .takeUnless { it.isNaN() }?.toFloat()?.coerceIn(0f, 2f) ?: 1f,
         )
     }
 }

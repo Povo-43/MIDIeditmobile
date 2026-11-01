@@ -61,9 +61,10 @@ object AudioExporter {
     /**
      * Renders every note (plus sustain pedal events) of [Project.track] through
      * [soundFont]. The returned array holds interleaved stereo 16-bit PCM at
-     * [SAMPLE_RATE].
+     * [SAMPLE_RATE]. [masterGain] is the user volume multiplier so exports
+     * sound at the same level as playback.
      */
-    fun renderPcm(project: Project, soundFont: SoundFont): ShortArray {
+    fun renderPcm(project: Project, soundFont: SoundFont, masterGain: Float = 1f): ShortArray {
         if (project.track.notes.isEmpty() && !project.track.rawEvents.any { it.isSustain }) {
             return ShortArray(0)
         }
@@ -90,7 +91,7 @@ object AudioExporter {
             .coerceAtMost(MAX_DURATION_SECONDS)
         val totalFrames = (seconds * SAMPLE_RATE).toInt().coerceAtLeast(1)
 
-        val synth = PianoSynth.Offline(soundFont, SAMPLE_RATE)
+        val synth = PianoSynth.Offline(soundFont, SAMPLE_RATE, masterGain)
         val pcm = ShortArray(totalFrames * AUDIO_CHANNELS)
         try {
             var index = 0

@@ -36,7 +36,12 @@ class PianoSynth(
     private val renderThread: Thread
     @Volatile private var running = true
     @Volatile private var sustainOn = false
-    @Volatile private var masterVolume = 1.24f
+
+    /** Multiplier set from the settings volume slider (1 = neutral). */
+    @Volatile private var userGain = 1f
+
+    /** Effective gain read by the render loop: the base times [userGain]. */
+    @Volatile private var masterVolume = BASE_MASTER_VOLUME
     @Volatile private var lastError: String? = null
     private val chunkFrames = 256
 
@@ -92,7 +97,7 @@ class PianoSynth(
     }
 
     fun setMasterVolume(value: Float) {
-        commands.add(Command.Volume(value.coerceIn(0f, 2f)))
+        commands.add(Command.Volume(value.coerceIn(0f, 4f)))
     }
 
     fun allNotesOff(fast: Boolean = false) {
@@ -172,7 +177,10 @@ class PianoSynth(
                         }
                     }
                 }
-                is Command.Volume -> masterVolume = cmd.value
+                is Command.Volume -> {
+                    userGain = cmd.value
+                    masterVolume = BASE_MASTER_VOLUME * userGain
+                }
                 is Command.AllNotesOff -> {
                     sustainOn = false
                     for (v in voices) {
@@ -268,8 +276,21 @@ class PianoSynth(
             ).toFloat()
         private val attenuationGain = 10.0.pow(-region.attenuationCb / 200.0).toFloat()
         private val pan = region.pan.coerceIn(-0.5, 0.5)
-        private val leftGain = sqrt((0.5 - pan).toFloat()) * velocityGain * attenuationGain * 0.42f
-        private val rightGain = sqrt((0.5 + pan).toFloat()) * velocityGain * attenuationGain * 0.42f
+
+        // Mono voices use equal-power panning around the centre. A stereo
+        // half is routed to its own channel only, at the same per-channel
+        // level as a centred mono voice so banks stay at a consistent volume.
+        private val baseGain = velocityGain * attenuationGain * 0.42f
+        private val leftGain = when {
+            region.stereoSide < 0 -> CENTER_GAIN * baseGain
+            region.stereoSide > 0 -> 0f
+            else -> sqrt((0.5f - pan).toFloat()) * baseGain
+        }
+        private val rightGain = when {
+            region.stereoSide > 0 -> CENTER_GAIN * baseGain
+            region.stereoSide < 0 -> 0f
+            else -> sqrt((0.5f + pan).toFloat()) * baseGain
+        }
 
         enum class Stage { DELAY, ATTACK, HOLD, DECAY, SUSTAIN, RELEASE, DONE }
 
@@ -388,11 +409,12 @@ class PianoSynth(
     internal class Offline(
         private val soundFont: SoundFont,
         private val outputSampleRate: Int = 44100,
+        userGain: Float = 1f,
     ) : AutoCloseable {
 
         private val voices = ArrayList<Voice>(64)
         private var sustainOn = false
-        private val masterVolume = 1.24f
+        private val masterVolume = BASE_MASTER_VOLUME * userGain
 
         fun noteOn(pitch: Int, velocity: Int, channel: Int = 0) {
             startNote(pitch.coerceIn(0, 127), velocity.coerceIn(1, 127), channel and 0x0F)
@@ -496,5 +518,17 @@ class PianoSynth(
         override fun close() {
             voices.clear()
         }
+    }
+
+    companion object {
+        /**
+         * The neutral master gain, kept from the original synth: it lifts
+         * quiet banks a little while the soft saturation guards chords.
+         * The settings volume slider multiplies this base.
+         */
+        const val BASE_MASTER_VOLUME = 1.24f
+
+        /** Per-channel level of a centred mono voice (equal-power panning). */
+        const val CENTER_GAIN = 0.70710678f
     }
 }

@@ -34,17 +34,22 @@ data class SfRegion(
     val loopMode: Int,
     val envelope: SfEnvelope,
     val exclusiveClass: Int,
+    /**
+     * Which output channel this region feeds: 0 = mono / centred, -1 = the
+     * left half of a stereo sample pair, 1 = the right half.
+     */
+    val stereoSide: Int = 0,
 )
 
 /**
  * A parsed SoundFont 2.04 instrument.
  *
- * Supported: mono samples, key/velocity zones, root key, coarse/fine tuning,
+ * Supported: mono samples, stereo sample pairs (each half is rendered to its
+ * own output channel), key/velocity zones, root key, coarse/fine tuning,
  * volume envelope, attenuation, pan, sample loop modes, global preset /
  * instrument zones and generator precedence (instrument wins for non-additive
  * values). Preset selection falls back over every preset when the preferred
- * one has no playable zones, and fully stereo banks are played as single
- * channels instead of failing. Modulators, filters and LFOs are not applied;
+ * one has no playable zones. Modulators, filters and LFOs are not applied;
  * they are ignored rather than silently mangled.
  */
 class SoundFont(
@@ -194,6 +199,7 @@ object SoundFontLoader {
                 sampleRate = readIntLE(shdr, o + 36),
                 originalPitch = shdr[o + 40].toInt() and 0xFF,
                 pitchCorrection = shdr[o + 41].toInt(),
+                sampleLink = readShortLE(shdr, o + 42) and 0xFFFF,
                 sampleType = readShortLE(shdr, o + 44) and 0xFFFF,
             )
         }
@@ -264,20 +270,17 @@ object SoundFontLoader {
         }
 
         /**
-         * Builds the playable regions of one preset. `allowStereo` opens the
-         * last-resort pass: stereo pairs are rendered as a single channel
-         * (first half wins) instead of being rejected outright.
+         * Builds the playable regions of one preset. Stereo sample pairs are
+         * kept as two regions, one per side, each rendered to its own output
+         * channel; mono samples stay centred.
          */
-        fun regionsFor(presetIndex: Int, allowStereo: Boolean): List<SfRegion> {
+        fun regionsFor(presetIndex: Int): List<SfRegion> {
             val chosen = presets[presetIndex]
             val presetZoneEnd = presets.getOrNull(presetIndex + 1)?.bagIndex ?: pbagCount
             val presetZones = zoneGenerators(
                 chosen.bagIndex, presetZoneEnd, pbag, pgen, pgenCount, pbagCount
             )
             val regions = ArrayList<SfRegion>()
-            // In the stereo pass both halves of a pair usually cover the same
-            // key range; keep the first voice so mono is not stacked out of phase.
-            val playedRanges = HashSet<Long>()
             var presetGlobal = emptyMap<Int, Int>()
 
             for (pz in presetZones) {
@@ -304,12 +307,7 @@ object SoundFontLoader {
                     }
                     if (sampleId < 0 || sampleId >= sampleHeaders.size) continue
                     val sh = sampleHeaders[sampleId]
-                    val stereo = sh.sampleType !in 0..1
-                    if (stereo && !allowStereo) {
-                        // Mono first: stereo pairs are only mapped to a single
-                        // channel by the last-resort pass.
-                        continue
-                    }
+                    val side = stereoSideOf(sh, sampleHeaders)
                     val mergedInst = instGlobal + iz
                     val iKey = rangeOf(mergedInst[43])
                     val iVel = rangeOf(mergedInst[44])
@@ -318,14 +316,6 @@ object SoundFontLoader {
                     val velLow = maxOf(pVel.first, iVel.first)
                     val velHigh = minOf(pVel.second, iVel.second)
                     if (keyLow > keyHigh || velLow > velHigh) continue
-                    if (stereo && allowStereo) {
-                        val rangeCode = (keyLow.toLong() shl 24) or
-                            (keyHigh.toLong() shl 16) or
-                            (velLow.toLong() shl 8) or
-                            velHigh.toLong()
-                        if (!playedRanges.add(rangeCode)) continue
-                    }
-
                     val gens = HashMap<Int, Int>()
                     gens.putAll(mergedPreset)
                     gens.putAll(mergedInst)
@@ -380,26 +370,41 @@ object SoundFontLoader {
                         loopMode = if (hasLoop) loopMode else 0,
                         envelope = env,
                         exclusiveClass = gens[57] ?: 0,
+                        stereoSide = side,
                     )
                 }
             }
 
-            return regions
+            // A stereo half whose counterpart never appears would stay silent
+            // on one side (the "sound only in the left ear" bug). Such orphans
+            // play centred instead — pan included, because a pair zone's pan
+            // usually just reinforces its side and would keep the note
+            // hard-panned into the channel without audio.
+            fun hasCounterpart(r: SfRegion): Boolean {
+                if (r.stereoSide == 0) return true
+                val other = -r.stereoSide
+                return regions.any { o ->
+                    o.stereoSide == other &&
+                        o.keyLow <= r.keyHigh && o.keyHigh >= r.keyLow &&
+                        o.velocityLow <= r.velocityHigh && o.velocityHigh >= r.velocityLow
+                }
+            }
+            return regions.map {
+                if (hasCounterpart(it)) it else it.copy(stereoSide = 0, pan = 0.0)
+            }
         }
 
-        // Prefer the standard preset with mono samples; when a bank only has
-        // stereo pairs, retry and render one channel of each pair as mono.
-        for (allowStereo in listOf(false, true)) {
-            for (presetIndex in presetOrder) {
-                val found = regionsFor(presetIndex, allowStereo)
-                if (found.isNotEmpty()) {
-                    return SoundFont(
-                        name = infoName ?: "Piano SoundFont",
-                        presetName = presets[presetIndex].name,
-                        sampleData = samples,
-                        regions = found.sortedWith(compareBy({ it.keyLow }, { it.velocityLow })),
-                    )
-                }
+        // Every preset is tried in order; stereo pairs are first-class now, so
+        // a bank no longer needs a mono fallback pass to be playable.
+        for (presetIndex in presetOrder) {
+            val found = regionsFor(presetIndex)
+            if (found.isNotEmpty()) {
+                return SoundFont(
+                    name = infoName ?: "Piano SoundFont",
+                    presetName = presets[presetIndex].name,
+                    sampleData = samples,
+                    regions = found.sortedWith(compareBy({ it.keyLow }, { it.velocityLow })),
+                )
             }
         }
         throw SoundFontException("再生可能なゾーンがありません")
@@ -480,8 +485,28 @@ object SoundFontLoader {
         val sampleRate: Int,
         val originalPitch: Int,
         val pitchCorrection: Int,
+        val sampleLink: Int,
         val sampleType: Int,
     )
+
+    /**
+     * Which half of a stereo pair the sample feeds: -1 = left, 0 = mono,
+     * 1 = right (SF2 spec sampleType: 0 mono, 1 right, 2 left, 3 linked,
+     * 4-7 the ROM equivalents). Linked samples take their side from the type
+     * of the partner they point at; when that is ambiguous they degrade to
+     * mono so they can never end up hard-panned to one ear.
+     */
+    private fun stereoSideOf(sh: SampleHeader, headers: List<SampleHeader>): Int =
+        when (sh.sampleType) {
+            2, 6 -> -1
+            1, 5 -> 1
+            3, 7 -> when (headers.getOrNull(sh.sampleLink)?.sampleType) {
+                2, 6 -> 1
+                1, 5 -> -1
+                else -> 0
+            }
+            else -> 0
+        }
 
     private fun rangeOf(amount: Int?): Pair<Int, Int> {
         if (amount == null) return 0 to 127
