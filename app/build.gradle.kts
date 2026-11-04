@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.midiedit.midi"
+    namespace = "com.medit.midi"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.midiedit.midi"
+        applicationId = "com.medit.midi"
         minSdk = 26
         targetSdk = 34
         versionCode = 15

@@ -61,9 +61,9 @@ adb shell dumpsys window displays | grep -iE "cutout|stable" | head -8 || true
 
 capture() {
   local prefix="$1"
-  adb shell am force-stop com.midiedit.midi || true
-  adb shell pm clear com.midiedit.midi > /dev/null 2>&1 || true
-  adb shell am start -W -n com.midiedit.midi/.MainActivity || true
+  adb shell am force-stop com.medit.midi || true
+  adb shell pm clear com.medit.midi > /dev/null 2>&1 || true
+  adb shell am start -W -n com.medit.midi/.MainActivity || true
   sleep 12
   adb exec-out screencap -p > "${prefix}-welcome.png" || true
   adb shell rm -f /sdcard/window.xml || true
@@ -122,12 +122,12 @@ PY
 
 RELEASE_APK=$(ls release/*.apk | head -1)
 echo "Installing previous release: ${RELEASE_APK}"
-adb uninstall com.midiedit.midi > /dev/null 2>&1 || true
+adb uninstall com.medit.midi > /dev/null 2>&1 || true
 install_with_retry "${RELEASE_APK}"
 capture before
 
 echo "Installing current debug build"
-adb uninstall com.midiedit.midi > /dev/null 2>&1 || true
+adb uninstall com.medit.midi > /dev/null 2>&1 || true
 install_with_retry app/build/outputs/apk/debug/app-debug.apk
 capture after
 

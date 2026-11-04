@@ -1,11 +1,11 @@
-# MIDIeditmobile
+# Medit
 
 Android タブレット向けの、ピアノ専用 MIDI エディタです。Kotlin + Jetpack Compose で構成し、
 ピアノロールだけはスタイラスホバーと細かいポインタ制御のため、独自の `View` + `Canvas` で描画・操作しています。
 WebView や Web アプリは使用していません。
 
-- パッケージ: `com.midiedit.midi`
-- アプリ名: MIDIeditmobile
+- パッケージ: `com.medit.midi`
+- アプリ名: Medit
 - minSdk 26 / targetSdk 34
 - 内蔵音源: 同梱の `app/src/main/assets/piano.sf2`（自前生成・CC0）
 - 出力 APK: `app/build/outputs/apk/debug/app-debug.apk`（開発用） / `app/build/outputs/apk/release/app-release.apk`（配布用）
@@ -247,7 +247,7 @@ BPM・拍子変更に対応（最大 60 段）。
 ## アーキテクチャ
 
 ```
-app/src/main/java/com/midiedit/midi/
+app/src/main/java/com/medit/midi/
 ├── MainActivity.kt            単一 Activity。ACTION_VIEW と自動保存の起動順を制御
 ├── model/Model.kt             Note / Track / Project / TempoMap / MeterMap / GridUnit
 ├── midi/MidiFile.kt           依存ライブラリなしの SMF パーサ・ライタ

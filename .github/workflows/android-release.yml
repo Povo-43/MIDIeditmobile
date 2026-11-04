@@ -95,7 +95,7 @@ jobs:
           # The package must be parseable by aapt2 and match the expected package.
           BADGING=$("${BUILD_TOOLS}/aapt2" dump badging "${APK}")
           echo "${BADGING}" | head -3
-          echo "${BADGING}" | grep -q "^package: name='com.midiedit.midi'"
+          echo "${BADGING}" | grep -q "^package: name='com.medit.midi'"
 
       - name: Prepare release artifact
         id: artifact
@@ -107,7 +107,7 @@ jobs:
           else
             SUFFIX="dev-${GITHUB_SHA::7}"
           fi
-          NAME="MIDIeditmobile-${VERSION_NAME}-${SUFFIX}.apk"
+          NAME="Medit-${VERSION_NAME}-${SUFFIX}.apk"
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk "dist/${NAME}"
           (cd dist && sha256sum "${NAME}" > "${NAME}.sha256")
@@ -134,9 +134,9 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            MIDIeditmobile の Android APK です。
+            Medit の Android APK です。
 
-            - パッケージ: `com.midiedit.midi`
+            - パッケージ: `com.medit.midi`
             - 対応バージョン: Android 8.0 (API 26) 以上
             - 署名: リリース署名（v1 / v2 / v3）
 

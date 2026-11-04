@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MIDIeditmobile"
+rootProject.name = "Medit"
 include(":app")
